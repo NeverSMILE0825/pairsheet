@@ -60,6 +60,10 @@ A locale segment is fine: `/app/en/ether/pair-explorer/0x…`.
 
 Tick the checkbox on any rows (or the header box to tick everything currently shown), then press **Calculate Income**. Only buys and sells are counted (add/remove rows are listed as skipped). The panel shows the exact sum of the quote token (WETH on this pool) across the selected transactions, split into bought and sold, plus net (sold minus bought) and the USD value at trade time. Selections survive filter changes; changing the selection clears the old result so it never shows a stale number.
 
+## Extract by time
+
+Use **Start time** and **End time** above the table (year, month, day, hour, minute, second in the chosen time zone), then press **Extract**. The table and Download CSV show only trades in that inclusive range. **Clear period** removes the time filter.
+
 ## Pool size after each swap
 
 Every row shows how much of each token the pool held right after that transaction (the "Pool FWOG" and "Pool WETH" columns, and `pool_base_after` / `pool_quote_after` in the CSV). The cells are rounded; hover for the exact value.

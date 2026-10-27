@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Users, X } from "lucide-react"
+import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -25,8 +26,23 @@ import {
   sumDecimals,
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
-import { AUTO_ZONE, detectZone, formatTradeDate, resolveZone, zoneAbbreviation, zoneOptions } from "@/lib/timezone"
+import {
+  AUTO_ZONE,
+  dateToParts,
+  detectZone,
+  formatParts,
+  formatTradeDate,
+  isoToParts,
+  resolveZone,
+  zoneAbbreviation,
+  zoneOptions,
+  zonedPartsEndMs,
+  zonedPartsToUtc,
+  type DateTimeParts,
+} from "@/lib/timezone"
 import type { PoolView, SwapsResponse, Trade } from "@/lib/types"
+
+type PeriodFilter = { startMs: number; endMs: number }
 
 const MAX_TRADES = 20000
 const ZONE_KEY = "pairsheet.timezone"
@@ -116,6 +132,10 @@ export function Exporter() {
   const run = useRef(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [income, setIncome] = useState<Income | null>(null)
+  const [startAt, setStartAt] = useState<DateTimeParts | null>(null)
+  const [endAt, setEndAt] = useState<DateTimeParts | null>(null)
+  const [period, setPeriod] = useState<PeriodFilter | null>(null)
+  const [periodError, setPeriodError] = useState<string | null>(null)
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
     const chain = getChain(chainId)
@@ -207,6 +227,10 @@ export function Exporter() {
     setSelected(new Set())
     setIncome(null)
     setFunding(null)
+    setStartAt(null)
+    setEndAt(null)
+    setPeriod(null)
+    setPeriodError(null)
     setPage(0)
     setProgress("Reading transactions from the chain…")
 
@@ -287,12 +311,45 @@ export function Exporter() {
   const makerSummaries = useMemo(() => summarizeMakers(trades), [trades])
   const quotePrice = useMemo(() => latestQuotePrice(trades), [trades])
 
+  const tapeBounds = useMemo(() => {
+    if (trades.length === 0) return null
+    let oldest = trades[0]
+    let newest = trades[0]
+    for (const trade of trades) {
+      if (
+        trade.blockNumber < oldest.blockNumber ||
+        (trade.blockNumber === oldest.blockNumber && trade.logIndex < oldest.logIndex)
+      ) {
+        oldest = trade
+      }
+      if (
+        trade.blockNumber > newest.blockNumber ||
+        (trade.blockNumber === newest.blockNumber && trade.logIndex > newest.logIndex)
+      ) {
+        newest = trade
+      }
+    }
+    const start = isoToParts(oldest.timestamp, zone)
+    const end = isoToParts(newest.timestamp, zone)
+    if (!start || !end) return null
+    return {
+      start,
+      end,
+      yearMin: Math.min(start.year, end.year),
+      yearMax: Math.max(start.year, end.year),
+    }
+  }, [trades, zone])
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const rows = trades.filter((trade) => {
       if (filter !== "ALL" && trade.type !== filter) return false
       if (funder === "__none__" && trade.fundedByAddress) return false
       if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
+      if (period) {
+        const time = Date.parse(trade.timestamp)
+        if (!Number.isFinite(time) || time < period.startMs || time > period.endMs) return false
+      }
       if (!needle) return true
       return (
         trade.maker.includes(needle) ||
@@ -319,7 +376,7 @@ export function Exporter() {
       if (missingA !== missingB) return missingA ? 1 : -1
       return compareTrades(a, b, sortKey) * direction
     })
-  }, [trades, filter, funder, query, sortKey, sortDesc, selected])
+  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
@@ -397,6 +454,34 @@ export function Exporter() {
       net: sumDecimals([sold, `-${bought}`]),
       usd: usdValues.length > 0 ? sumDecimals(usdValues) : null,
     })
+  }
+
+  function extractPeriod() {
+    if (!startAt || !endAt) {
+      setPeriodError("Pick a start time and an end time.")
+      return
+    }
+    let startParts = startAt
+    let endParts = endAt
+    let startMs = zonedPartsToUtc(startParts, zone).getTime()
+    let endMs = zonedPartsEndMs(endParts, zone)
+    if (endMs < startMs) {
+      startParts = endAt
+      endParts = startAt
+      setStartAt(startParts)
+      setEndAt(endParts)
+      startMs = zonedPartsToUtc(startParts, zone).getTime()
+      endMs = zonedPartsEndMs(endParts, zone)
+    }
+    setPeriodError(null)
+    setPeriod({ startMs, endMs })
+    setPage(0)
+  }
+
+  function clearPeriod() {
+    setPeriod(null)
+    setPeriodError(null)
+    setPage(0)
   }
 
   function toggleSort(key: SortKey) {
@@ -603,34 +688,88 @@ export function Exporter() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10">
-            <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={selected.size === 0}>
-              <Calculator />
-              Calculate Income
-            </Button>
-            <p className="text-sm text-muted-foreground" aria-live="polite">
-              {selected.size === 0
-                ? "Tick transactions in the table, then calculate the WETH total."
-                : `${selected.size.toLocaleString("en-US")} transaction${selected.size === 1 ? "" : "s"} selected`}
-            </p>
-            {filtered.length > pageRows.length && !allMatchingSelected ? (
-              <button
-                type="button"
-                className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
-                onClick={selectAllMatching}
-              >
-                Select all {filtered.length.toLocaleString("en-US")} matching
-              </button>
+          <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={selected.size === 0}>
+                <Calculator />
+                Calculate Income
+              </Button>
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                {selected.size === 0
+                  ? "Tick transactions in the table, then calculate the WETH total."
+                  : `${selected.size.toLocaleString("en-US")} transaction${selected.size === 1 ? "" : "s"} selected`}
+              </p>
+              {filtered.length > pageRows.length && !allMatchingSelected ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
+                  onClick={selectAllMatching}
+                >
+                  Select all {filtered.length.toLocaleString("en-US")} matching
+                </button>
+              ) : null}
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <DateTimeField
+                  label="Start time"
+                  value={startAt}
+                  onChange={setStartAt}
+                  fallback={tapeBounds?.start ?? null}
+                  yearMin={tapeBounds?.yearMin}
+                  yearMax={tapeBounds?.yearMax}
+                />
+                <DateTimeField
+                  label="End time"
+                  value={endAt}
+                  onChange={setEndAt}
+                  fallback={tapeBounds?.end ?? null}
+                  yearMin={tapeBounds?.yearMin}
+                  yearMax={tapeBounds?.yearMax}
+                />
+                <Button
+                  type="button"
+                  size="lg"
+                  className="h-10"
+                  onClick={extractPeriod}
+                  disabled={!startAt || !endAt}
+                >
+                  <CalendarRange />
+                  Extract
+                </Button>
+                {selected.size > 0 ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
+                    onClick={() => changeSelection((draft) => draft.clear())}
+                  >
+                    <X className="size-3.5" />
+                    Clear selection
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {periodError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {periodError}
+              </p>
             ) : null}
-            {selected.size > 0 ? (
-              <button
-                type="button"
-                className="ml-auto inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
-                onClick={() => changeSelection((draft) => draft.clear())}
-              >
-                <X className="size-3.5" />
-                Clear selection
-              </button>
+            {period ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>
+                  Showing {filtered.length.toLocaleString("en-US")} transaction{filtered.length === 1 ? "" : "s"} from{" "}
+                  <span className="font-mono text-foreground">{formatParts(dateToParts(new Date(period.startMs), zone))}</span>
+                  {" – "}
+                  <span className="font-mono text-foreground">{formatParts(dateToParts(new Date(period.endMs), zone))}</span>
+                  {" "}({zoneName})
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-foreground hover:bg-accent"
+                  onClick={clearPeriod}
+                >
+                  <X className="size-3.5" />
+                  Clear period
+                </button>
+              </div>
             ) : null}
           </div>
 

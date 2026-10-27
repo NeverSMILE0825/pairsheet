@@ -1,11 +1,86 @@
 export const AUTO_ZONE = "auto"
 
+export type DateTimeParts = {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
+}
+
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
 export function detectZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   } catch {
     return "UTC"
   }
+}
+
+export function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+export function clampParts(value: DateTimeParts): DateTimeParts {
+  const maxDay = daysInMonth(value.year, value.month)
+  return {
+    year: value.year,
+    month: Math.min(12, Math.max(1, value.month)),
+    day: Math.min(maxDay, Math.max(1, value.day)),
+    hour: Math.min(23, Math.max(0, value.hour)),
+    minute: Math.min(59, Math.max(0, value.minute)),
+    second: Math.min(59, Math.max(0, value.second)),
+  }
+}
+
+export function dateToParts(date: Date, zone: string): DateTimeParts {
+  const p = parts(date, zone)
+  return {
+    year: Number(p.year),
+    month: Number(p.month),
+    day: Number(p.day),
+    hour: Number(p.hour),
+    minute: Number(p.minute),
+    second: Number(p.second),
+  }
+}
+
+export function isoToParts(iso: string, zone: string): DateTimeParts | null {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return null
+  return dateToParts(date, zone)
+}
+
+/** Wall-clock time in `zone` → UTC Date (handles DST by refining the offset). */
+export function zonedPartsToUtc(value: DateTimeParts, zone: string): Date {
+  const fixed = clampParts(value)
+  const want = Date.UTC(fixed.year, fixed.month - 1, fixed.day, fixed.hour, fixed.minute, fixed.second)
+  let guess = want
+  for (let i = 0; i < 4; i += 1) {
+    const got = dateToParts(new Date(guess), zone)
+    const asUtc = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute, got.second)
+    const delta = want - asUtc
+    if (delta === 0) break
+    guess += delta
+  }
+  return new Date(guess)
+}
+
+/** Inclusive end of the chosen second (ms). */
+export function zonedPartsEndMs(value: DateTimeParts, zone: string): number {
+  return zonedPartsToUtc(value, zone).getTime() + 999
+}
+
+export function formatParts(value: DateTimeParts): string {
+  const fixed = clampParts(value)
+  const yy = String(fixed.year).slice(-2)
+  return `${MONTH_SHORT[fixed.month - 1]} ${fixed.day} ${yy} ${pad2(fixed.hour)}:${pad2(fixed.minute)}:${pad2(fixed.second)}`
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0")
 }
 
 export function resolveZone(choice: string): string {

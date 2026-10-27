@@ -12,7 +12,17 @@ import {
   totalUsd,
 } from "./format"
 import { earliestIncoming, funderLabel, type FundingRow } from "./funded"
-import { formatTradeDate, formatZoned, resolveZone, zoneAbbreviation, zoneOptions } from "./timezone"
+import {
+  clampParts,
+  formatParts,
+  formatTradeDate,
+  formatZoned,
+  resolveZone,
+  zoneAbbreviation,
+  zoneOptions,
+  zonedPartsEndMs,
+  zonedPartsToUtc,
+} from "./timezone"
 import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
 import { assignSync, recordSync, swapKey, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
@@ -359,4 +369,14 @@ test("shows times in the chosen time zone", () => {
   const options = zoneOptions()
   assert.equal(options.some((option) => option.value === "Asia/Seoul"), true)
   assert.match(options.find((option) => option.value === "Asia/Seoul")?.label ?? "", /^\(UTC\+09:00\) Asia\/Seoul$/)
+})
+
+test("converts wall-clock parts in a zone to UTC and back", () => {
+  const seoul = { year: 2024, month: 8, day: 5, hour: 0, minute: 54, second: 23 }
+  const utc = zonedPartsToUtc(seoul, "Asia/Seoul")
+  assert.equal(utc.toISOString(), "2024-08-04T15:54:23.000Z")
+  assert.equal(formatParts(seoul), "Aug 5 24 00:54:23")
+  assert.equal(zonedPartsEndMs(seoul, "Asia/Seoul") - utc.getTime(), 999)
+  const feb = clampParts({ year: 2023, month: 2, day: 31, hour: 0, minute: 0, second: 0 })
+  assert.equal(feb.day, 28)
 })
