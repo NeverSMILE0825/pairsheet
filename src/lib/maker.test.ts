@@ -13,6 +13,7 @@ import type { Trade } from "./types"
 function trade(partial: Partial<Trade> & Pick<Trade, "type" | "maker">): Trade {
   return {
     id: partial.txHash ?? partial.maker,
+    txNo: 0,
     timestamp: "2024-01-01T00:00:00.000Z",
     blockNumber: 1,
     logIndex: 0,

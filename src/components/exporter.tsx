@@ -45,6 +45,7 @@ const FILTER_LABELS: Record<SideFilter, string> = {
   REMOVE: "Removes",
 }
 type SortKey =
+  | "txNo"
   | "timestamp"
   | "type"
   | "priceUsd"
@@ -405,7 +406,7 @@ export function Exporter() {
       return
     }
     setSortKey(key)
-    setSortDesc(key !== "maker" && key !== "type" && key !== "fundedBy")
+    setSortDesc(key !== "maker" && key !== "type" && key !== "fundedBy" && key !== "txNo")
   }
 
   function download() {
@@ -675,7 +676,7 @@ export function Exporter() {
 
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1560px] border-collapse text-sm">
+              <table className="w-full min-w-[1620px] border-collapse text-sm">
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -702,6 +703,7 @@ export function Exporter() {
                         {sortKey === "selected" ? sortDesc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-50" />}
                       </button>
                     </th>
+                    <SortHeader label="No" column="txNo" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={`Date (${zoneName})`} column="timestamp" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
                     <SortHeader label="Type" column="type" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
                     <SortHeader label="Price (USD)" column="priceUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
@@ -735,7 +737,7 @@ export function Exporter() {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={14} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : trades.length === 0
@@ -757,6 +759,9 @@ export function Exporter() {
                             checked={selected.has(trade.id)}
                             onChange={() => toggleTrade(trade.id)}
                           />
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums" title="Transaction number (oldest = 1)">
+                          {trade.txNo.toLocaleString("en-US")}
                         </td>
                         <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
                         <td className="px-3 py-2">
@@ -976,7 +981,7 @@ function tagWeight(trade: Trade): number {
 }
 
 function isMissing(trade: Trade, key: SortKey): boolean {
-  if (key === "selected" || key === "others" || key === "makerTxCount") return false
+  if (key === "selected" || key === "others" || key === "makerTxCount" || key === "txNo") return false
   if (key === "fundedBy") return !trade.fundedBy
   if (key === "maker") return !trade.maker
   if (key === "timestamp" || key === "type") return false
@@ -989,6 +994,7 @@ function compareTrades(a: Trade, b: Trade, key: SortKey): number {
   if (key === "fundedBy") return (a.fundedBy || "").localeCompare(b.fundedBy || "")
   if (key === "selected" || key === "others") return 0
   if (key === "makerTxCount") return a.makerTxCount - b.makerTxCount
+  if (key === "txNo") return a.txNo - b.txNo
   return compareDecimal(a[key] ?? "0", b[key] ?? "0")
 }
 
@@ -1038,7 +1044,13 @@ function SortButton({
     <button
       type="button"
       className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}
-      aria-label={column === "makerTxCount" ? "Sort by maker transaction count" : undefined}
+      aria-label={
+        column === "makerTxCount"
+          ? "Sort by maker transaction count"
+          : column === "txNo"
+            ? "Sort by transaction number"
+            : undefined
+      }
       onClick={() => onSort(column)}
     >
       {label}

@@ -292,6 +292,7 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
     const usd = quotePrice === null ? null : totalUsd(swap.quoteRaw, pool.quote.decimals, quotePrice)
     const trade: Trade = {
       id: `${log.txHash}-${log.logIndex}`,
+      txNo: 0,
       timestamp: new Date(log.timestamp * 1000).toISOString(),
       blockNumber: log.blockNumber,
       logIndex: log.logIndex,

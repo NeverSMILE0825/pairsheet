@@ -13,7 +13,7 @@ import {
 } from "./format"
 import { earliestIncoming, funderLabel, type FundingRow } from "./funded"
 import { formatTradeDate, formatZoned, resolveZone, zoneAbbreviation, zoneOptions } from "./timezone"
-import { annotateTrades, routersToCheck } from "./annotate"
+import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
 import { assignSync, recordSync, swapKey, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -134,6 +134,7 @@ test("writes an excel-friendly csv", () => {
   }
   const trade: Trade = {
     id: "tx-1",
+    txNo: 17,
     timestamp: "2024-08-04T15:54:23.000Z",
     blockNumber: 20456217,
     logIndex: 206,
@@ -155,8 +156,8 @@ test("writes an excel-friendly csv", () => {
   }
   const csv = tradesToCsv(view, [trade], "Asia/Seoul")
   assert.equal(csv.startsWith("\uFEFF"), true)
-  assert.match(csv, /date_utc,date_local,timezone,type,price_usd,total_usd/)
-  assert.match(csv, /2024-08-04T15:54:23\.000Z,2024-08-05 00:54:23,Asia\/Seoul,SELL/)
+  assert.match(csv, /tx_no,date_utc,date_local,timezone,type,price_usd,total_usd/)
+  assert.match(csv, /17,2024-08-04T15:54:23\.000Z,2024-08-05 00:54:23,Asia\/Seoul,SELL/)
   assert.match(csv, /quote_amount,pool_base_after,pool_quote_after,maker/)
   assert.match(csv, /4\.45892281616295148,1234\.5,0\.0000099,0x591f/)
   assert.match(csv, /,40,bot;team,0x7a250d56/)
@@ -281,6 +282,7 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   const make = (id: string, type: Trade["type"], maker: string, to: string, block: number): Trade => ({
     ...base,
     id,
+    txNo: 0,
     type,
     maker,
     router: to,
@@ -302,7 +304,48 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   const out = annotateTrades(trades, pool.address, facts)
   assert.deepEqual(out.map((trade) => trade.makerTxCount), [1, 2, 2, 1])
   assert.deepEqual(out.map((trade) => trade.makerTags), [["team"], [], ["bot"], ["team"]])
+  assert.deepEqual(out.map((trade) => trade.txNo), [1, 2, 3, 4])
   assert.deepEqual(routersToCheck(trades, pool.address, 1), [router])
+})
+
+test("numbers transactions oldest-first and keeps them when reordered", () => {
+  const base = {
+    timestamp: "2024-08-04T15:54:23.000Z",
+    type: "BUY" as const,
+    priceUsd: null,
+    totalUsd: null,
+    priceQuote: null,
+    baseAmount: "1",
+    quoteAmount: "1",
+    baseReserve: null,
+    quoteReserve: null,
+    maker: "0x3333333333333333333333333333333333333333",
+    router: "0x4444444444444444444444444444444444444444",
+    makerTxCount: 0,
+    makerTags: [] as Trade["makerTags"],
+    fundedBy: null,
+    fundedByAddress: null,
+    txHash: "0x1",
+  }
+  const newestFirst = [
+    { ...base, id: "new", txNo: 0, blockNumber: 30, logIndex: 2 },
+    { ...base, id: "mid", txNo: 0, blockNumber: 20, logIndex: 5 },
+    { ...base, id: "old", txNo: 0, blockNumber: 10, logIndex: 9 },
+  ]
+  const numbered = assignTxNumbers(newestFirst)
+  assert.deepEqual(
+    numbered.map((trade) => [trade.id, trade.txNo]),
+    [
+      ["new", 3],
+      ["mid", 2],
+      ["old", 1],
+    ],
+  )
+  const byPrice = [numbered[1], numbered[0], numbered[2]]
+  assert.deepEqual(
+    byPrice.map((trade) => trade.txNo),
+    [2, 3, 1],
+  )
 })
 
 test("shows times in the chosen time zone", () => {

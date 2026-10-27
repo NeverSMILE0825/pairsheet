@@ -2,6 +2,7 @@ import { formatZoned } from "./timezone"
 import type { PoolView, Trade } from "./types"
 
 const HEADERS = [
+  "tx_no",
   "date_utc",
   "date_local",
   "timezone",
@@ -40,6 +41,7 @@ export function tradesToCsv(pool: PoolView, trades: Trade[], timeZone = "UTC"): 
   for (const trade of trades) {
     lines.push(
       [
+        trade.txNo,
         trade.timestamp,
         formatZoned(trade.timestamp, timeZone),
         timeZone,

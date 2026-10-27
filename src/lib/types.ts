@@ -45,6 +45,8 @@ export type PoolView = {
 
 export type Trade = {
   id: string
+  /** Chronological index among loaded trades; oldest is 1. Stable across sorts/filters. */
+  txNo: number
   timestamp: string
   blockNumber: number
   logIndex: number

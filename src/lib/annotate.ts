@@ -46,7 +46,7 @@ export function annotateTrades(trades: Trade[], poolAddress: string, facts: Wall
   if (facts.deployer) teamWallets.add(facts.deployer.toLowerCase())
   if (firstLiquidity) teamWallets.add(firstLiquidity.maker.toLowerCase())
 
-  return trades.map((trade) => {
+  const tagged = trades.map((trade) => {
     const maker = trade.maker.toLowerCase()
     const router = trade.router.toLowerCase()
     const info = router ? facts.contracts[router] : undefined
@@ -55,4 +55,14 @@ export function annotateTrades(trades: Trade[], poolAddress: string, facts: Wall
     if (maker && teamWallets.has(maker)) tags.push("team")
     return { ...trade, makerTxCount: counts.get(maker) ?? 0, makerTags: tags }
   })
+  return assignTxNumbers(tagged)
+}
+
+/** Oldest loaded trade is 1; same-block ties break on log index. Numbers stay with the row when sorting. */
+export function assignTxNumbers(trades: Trade[]): Trade[] {
+  const ranked = [...trades].sort(
+    (a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex || a.id.localeCompare(b.id),
+  )
+  const numbers = new Map(ranked.map((trade, index) => [trade.id, index + 1]))
+  return trades.map((trade) => ({ ...trade, txNo: numbers.get(trade.id) ?? 0 }))
 }

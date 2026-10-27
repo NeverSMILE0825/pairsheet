@@ -10,7 +10,9 @@ The app reads `Swap`, `Mint` (liquidity added) and `Burn` (liquidity removed) ev
 
 ## CSV columns
 
-`date_utc`, `date_local`, `timezone`, `type` (`BUY`, `SELL`, `ADD` or `REMOVE`), `price_usd`, `total_usd`, `price_in_quote`, `base_symbol`, `base_amount`, `quote_symbol`, `quote_amount`, `pool_base_after`, `pool_quote_after`, `maker`, `maker_tx_count`, `maker_tags`, `tx_to`, `funded_by`, `funded_by_address`, `tx_hash`, `block_number`, `log_index`, `chain`, `pool_address`
+`tx_no`, `date_utc`, `date_local`, `timezone`, `type` (`BUY`, `SELL`, `ADD` or `REMOVE`), `price_usd`, `total_usd`, `price_in_quote`, `base_symbol`, `base_amount`, `quote_symbol`, `quote_amount`, `pool_base_after`, `pool_quote_after`, `maker`, `maker_tx_count`, `maker_tags`, `tx_to`, `funded_by`, `funded_by_address`, `tx_hash`, `block_number`, `log_index`, `chain`, `pool_address`
+
+`tx_no` is the chronological index of that trade among the loaded history (oldest = 1). It stays with the row when you sort or filter the table, and the same value is written to the CSV.
 
 `funded_by` is the public name of the address that first sent native currency to the maker, the same “Funded by” field Etherscan shows. A known label such as Disperse.app is used when one exists. Otherwise the column shows the contract name, ENS name, or a shortened address. The table has the same Funded by column, and the dropdown above it filters the tape and the CSV to one funder.
 
