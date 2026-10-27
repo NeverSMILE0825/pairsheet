@@ -130,12 +130,16 @@ export function Exporter() {
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
   const run = useRef(0)
+  const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [income, setIncome] = useState<Income | null>(null)
   const [startAt, setStartAt] = useState<DateTimeParts | null>(null)
   const [endAt, setEndAt] = useState<DateTimeParts | null>(null)
   const [period, setPeriod] = useState<PeriodFilter | null>(null)
   const [periodError, setPeriodError] = useState<string | null>(null)
+  const [fromNo, setFromNo] = useState("")
+  const [toNo, setToNo] = useState("")
+  const [noError, setNoError] = useState<string | null>(null)
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
     const chain = getChain(chainId)
@@ -225,12 +229,16 @@ export function Exporter() {
     setFacts(EMPTY_FACTS)
     setFunder("")
     setSelected(new Set())
+    selectionAnchor.current = null
     setIncome(null)
     setFunding(null)
     setStartAt(null)
     setEndAt(null)
     setPeriod(null)
     setPeriodError(null)
+    setFromNo("")
+    setToNo("")
+    setNoError(null)
     setPage(0)
     setProgress("Reading transactions from the chain…")
 
@@ -419,6 +427,22 @@ export function Exporter() {
     })
   }
 
+  /** Normal click toggles one row. Shift+click selects every row between the anchor and this one (current table order). */
+  function selectTrade(trade: Trade, shiftKey: boolean) {
+    const index = filtered.findIndex((row) => row.id === trade.id)
+    if (index < 0) return
+    if (shiftKey && selectionAnchor.current !== null) {
+      const from = Math.min(selectionAnchor.current, index)
+      const to = Math.max(selectionAnchor.current, index)
+      changeSelection((draft) => {
+        for (let i = from; i <= to; i += 1) draft.add(filtered[i].id)
+      })
+      return
+    }
+    toggleTrade(trade.id)
+    selectionAnchor.current = index
+  }
+
   function toggleVisible() {
     changeSelection((draft) => {
       for (const trade of pageRows) {
@@ -426,12 +450,36 @@ export function Exporter() {
         else draft.add(trade.id)
       }
     })
+    selectionAnchor.current = pageRows.length > 0 ? filtered.findIndex((row) => row.id === pageRows[0].id) : null
   }
 
   function selectAllMatching() {
     changeSelection((draft) => {
       for (const trade of filtered) draft.add(trade.id)
     })
+    selectionAnchor.current = filtered.length > 0 ? 0 : null
+  }
+
+  function selectByTxNo() {
+    const from = Number.parseInt(fromNo.trim(), 10)
+    const to = Number.parseInt(toNo.trim(), 10)
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < 1) {
+      setNoError("Enter valid From No and To No (oldest = 1).")
+      return
+    }
+    const lo = Math.min(from, to)
+    const hi = Math.max(from, to)
+    const matches = trades.filter((trade) => trade.txNo >= lo && trade.txNo <= hi)
+    if (matches.length === 0) {
+      setNoError(`No transactions with No ${lo.toLocaleString("en-US")}–${hi.toLocaleString("en-US")}.`)
+      return
+    }
+    changeSelection((draft) => {
+      for (const trade of matches) draft.add(trade.id)
+    })
+    setNoError(null)
+    const first = filtered.findIndex((row) => row.id === matches[0].id)
+    selectionAnchor.current = first >= 0 ? first : null
   }
 
   function calculateIncome() {
@@ -475,17 +523,20 @@ export function Exporter() {
     }
     setPeriodError(null)
     setPeriod({ startMs, endMs })
+    selectionAnchor.current = null
     setPage(0)
   }
 
   function clearPeriod() {
     setPeriod(null)
     setPeriodError(null)
+    selectionAnchor.current = null
     setPage(0)
   }
 
   function toggleSort(key: SortKey) {
     setPage(0)
+    selectionAnchor.current = null
     if (sortKey === key) {
       setSortDesc((value) => !value)
       return
@@ -634,6 +685,7 @@ export function Exporter() {
                   className={`rounded-md px-3 py-1.5 text-sm font-medium ${filter === side ? "bg-background text-foreground" : "text-muted-foreground"}`}
                   onClick={() => {
                     setFilter(side)
+                    selectionAnchor.current = null
                     setPage(0)
                   }}
                 >
@@ -664,6 +716,7 @@ export function Exporter() {
                 value={funder}
                 onChange={(event) => {
                   setFunder(event.target.value)
+                  selectionAnchor.current = null
                   setPage(0)
                 }}
                 className="h-9 max-w-56 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
@@ -680,6 +733,7 @@ export function Exporter() {
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value)
+                selectionAnchor.current = null
                 setPage(0)
               }}
               placeholder="Filter by maker, funder, or tx"
@@ -696,7 +750,7 @@ export function Exporter() {
               </Button>
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 {selected.size === 0
-                  ? "Tick transactions in the table, then calculate the WETH total."
+                  ? "Tick rows, Shift+click a range, or select by No — then calculate."
                   : `${selected.size.toLocaleString("en-US")} transaction${selected.size === 1 ? "" : "s"} selected`}
               </p>
               {filtered.length > pageRows.length && !allMatchingSelected ? (
@@ -708,6 +762,54 @@ export function Exporter() {
                   Select all {filtered.length.toLocaleString("en-US")} matching
                 </button>
               ) : null}
+              <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 ring-1 ring-foreground/10">
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  From No
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="From transaction number"
+                    value={fromNo}
+                    onChange={(event) => {
+                      setFromNo(event.target.value.replace(/[^\d]/g, ""))
+                      setNoError(null)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") selectByTxNo()
+                    }}
+                    placeholder="1"
+                    className="h-8 w-16 rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  To No
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="To transaction number"
+                    value={toNo}
+                    onChange={(event) => {
+                      setToNo(event.target.value.replace(/[^\d]/g, ""))
+                      setNoError(null)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") selectByTxNo()
+                    }}
+                    placeholder="50"
+                    className="h-8 w-16 rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground"
+                  />
+                </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={selectByTxNo}
+                  disabled={!fromNo || !toNo || trades.length === 0}
+                >
+                  Select
+                </Button>
+              </div>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <DateTimeField
                   label="Start time"
@@ -739,7 +841,10 @@ export function Exporter() {
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
-                    onClick={() => changeSelection((draft) => draft.clear())}
+                    onClick={() => {
+                      changeSelection((draft) => draft.clear())
+                      selectionAnchor.current = null
+                    }}
                   >
                     <X className="size-3.5" />
                     Clear selection
@@ -747,6 +852,11 @@ export function Exporter() {
                 ) : null}
               </div>
             </div>
+            {noError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {noError}
+              </p>
+            ) : null}
             {periodError ? (
               <p className="text-sm text-destructive" role="alert">
                 {periodError}
@@ -894,9 +1004,14 @@ export function Exporter() {
                           <input
                             type="checkbox"
                             aria-label={`Select ${trade.type} ${trade.txHash}`}
+                            title="Click to toggle. Shift+click to select a range."
                             className="size-4 cursor-pointer accent-[var(--primary)]"
                             checked={selected.has(trade.id)}
-                            onChange={() => toggleTrade(trade.id)}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              selectTrade(trade, event.shiftKey)
+                            }}
+                            onChange={() => {}}
                           />
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums" title="Transaction number (oldest = 1)">
