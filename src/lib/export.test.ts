@@ -22,7 +22,7 @@ import {
   sumDecimals,
   totalUsd,
 } from "./format"
-import { earliestIncoming, funderLabel, type FundingRow } from "./funded"
+import { earliestIncoming, funderLabel, inboundSolFunder, type FundingRow } from "./funded"
 import {
   clampParts,
   formatParts,
@@ -36,7 +36,7 @@ import {
 } from "./timezone"
 import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
-import { assignSync, recordSync, swapKey, type SyncEvent } from "./reserves"
+import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
 
@@ -364,6 +364,60 @@ test("keeps significant digits for tiny pool sizes", () => {
   assert.equal(formatPoolSize("0.000009890697146748"), "0.00000989")
   assert.equal(formatPoolSize("4.458932706860098228"), "4.4589")
   assert.equal(formatPoolSize("0"), "0")
+})
+
+test("reads uniswap v4 pool sizes from swap liquidity and sqrt price", async () => {
+  const word = (value: bigint) => value.toString(16).padStart(64, "0")
+  const Q96 = 1n << 96n
+  const liquidity = 1_000_000n * 10n ** 18n
+  const sqrtPriceX96 = Q96 // price = 1
+  const data = `0x${word(0n)}${word(0n)}${word(sqrtPriceX96)}${word(liquidity)}${word(0n)}${word(0n)}`
+  const poolId = "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96"
+  const v4Pool: PoolContext = {
+    ...pool,
+    address: poolId,
+    logAddress: "0x000000000004444c5dc75cb358380d2e3de08a90",
+    topic1: poolId,
+    style: "v4",
+    token0: pool.base.address,
+    token1: pool.quote.address,
+  }
+  const virtual = v4VirtualReserves(data)
+  assert.ok(virtual)
+  assert.equal(virtual.amount0, liquidity)
+  assert.equal(virtual.amount1, liquidity)
+  const log: RawLog = {
+    data,
+    topics: [SWAP_V4_TOPIC, poolId],
+    blockNumber: 1,
+    timestamp: 1,
+    txHash: "0xabc",
+    logIndex: 7,
+  }
+  const sizes = await loadPoolSizes(
+    { id: "ether", name: "Ethereum", chainId: 1, gecko: "eth", llama: "ethereum", rpcs: [], blockscout: null, routescan: true, explorer: "", v4PoolManager: v4Pool.logAddress, wrappedNative: null },
+    v4Pool,
+    [log],
+  )
+  assert.deepEqual(sizes.get(swapKey(log)), { base: "1000000", quote: "1000000" })
+})
+
+test("detects the Solana wallet that funded a maker with SOL", () => {
+  const maker = "Maker1111111111111111111111111111111111111"
+  const funder = "Funder111111111111111111111111111111111111"
+  const tx = {
+    meta: {
+      err: null,
+      preBalances: [5_000_000_000, 0],
+      postBalances: [4_000_000_000, 1_000_000_000],
+      loadedAddresses: { writable: [], readonly: [] },
+    },
+    transaction: {
+      message: { accountKeys: [funder, maker] },
+    },
+  }
+  assert.equal(inboundSolFunder(tx, maker), funder)
+  assert.equal(inboundSolFunder({ ...tx, meta: { ...tx.meta, preBalances: [5, 5], postBalances: [4, 4] } }, maker), null)
 })
 
 test("decodes liquidity adds and removes", () => {

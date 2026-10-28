@@ -60,7 +60,12 @@ export async function resolveFunders(
   chain: ChainConfig,
   makers: string[],
   deadline = Number.POSITIVE_INFINITY,
+  earliestTradeSec?: Map<string, number>,
 ): Promise<FunderResult> {
+  if (chain.id === "solana") {
+    return resolveSolanaFunders(chain, makers, deadline, earliestTradeSec)
+  }
+
   const unique = [...new Set(makers.map((maker) => maker.toLowerCase()).filter(Boolean))]
   const found = new Map<string, Funder>()
   const failed: string[] = []
@@ -81,6 +86,214 @@ export async function resolveFunders(
     }
   })
   return { found, failed }
+}
+
+const SOLANA_SIG_PAGE = 1000
+const SOLANA_MAX_PAGES = 8
+const SOLANA_LOOKBACK_SEC = 48 * 3600
+const SOLANA_MIN_FUND_LAMPORTS = 10_000n
+const SOLANA_SKIP_ACCOUNTS = new Set([
+  "11111111111111111111111111111111",
+  "ComputeBudget111111111111111111111111111111",
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  "So11111111111111111111111111111111111111112",
+  "SysvarRent111111111111111111111111111111111",
+  "SysvarC1ock11111111111111111111111111111111",
+])
+
+/**
+ * Solana wallets often have huge histories, so we resolve "funded by" as the
+ * earliest inbound SOL transfer at/before the maker's first trade in this export
+ * (within a lookback window) — the same signal used for sniper/session funding.
+ */
+async function resolveSolanaFunders(
+  chain: ChainConfig,
+  makers: string[],
+  deadline: number,
+  earliestTradeSec?: Map<string, number>,
+): Promise<FunderResult> {
+  const unique = [...new Set(makers.filter(Boolean))]
+  const found = new Map<string, Funder>()
+  const failed: string[] = []
+  await mapPool(unique, 4, async (maker) => {
+    if (Date.now() > deadline) {
+      failed.push(maker)
+      return
+    }
+    try {
+      const target = earliestTradeSec?.get(maker) ?? null
+      const address = await findSolanaFunder(chain.rpcs, maker, target, deadline)
+      if (!address) return
+      found.set(maker, { address, label: shortAddress(address) })
+    } catch {
+      failed.push(maker)
+    }
+  })
+  return { found, failed }
+}
+
+async function findSolanaFunder(
+  rpcs: string[],
+  maker: string,
+  firstTradeSec: number | null,
+  deadline: number,
+): Promise<string | null> {
+  const target = firstTradeSec ?? Math.floor(Date.now() / 1000)
+  const floor = target - SOLANA_LOOKBACK_SEC
+  const candidates: { signature: string; blockTime: number }[] = []
+  let before: string | null = null
+
+  for (let page = 0; page < SOLANA_MAX_PAGES; page += 1) {
+    if (Date.now() > deadline) break
+    const rows = await solanaSignatures(rpcs, maker, before)
+    if (rows.length === 0) break
+    let pastFloor = false
+    for (const row of rows) {
+      if (row.err != null || row.blockTime == null) continue
+      if (row.blockTime > target) continue
+      if (row.blockTime < floor) {
+        pastFloor = true
+        continue
+      }
+      candidates.push({ signature: row.signature, blockTime: row.blockTime })
+    }
+    before = rows[rows.length - 1]?.signature ?? null
+    const oldest = rows[rows.length - 1]?.blockTime
+    if (!before || rows.length < SOLANA_SIG_PAGE) break
+    if (pastFloor || (typeof oldest === "number" && oldest < floor)) break
+  }
+
+  candidates.sort((a, b) => a.blockTime - b.blockTime || a.signature.localeCompare(b.signature))
+  const window = candidates.slice(0, 80)
+  for (const row of window) {
+    if (Date.now() > deadline) break
+    try {
+      const tx = await solanaTransaction(rpcs, row.signature)
+      const funder = inboundSolFunder(tx, maker)
+      if (funder) return funder
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+export function inboundSolFunder(
+  tx: {
+    meta: {
+      err: unknown
+      preBalances: number[]
+      postBalances: number[]
+      loadedAddresses?: { writable?: string[]; readonly?: string[] }
+    } | null
+    transaction: { message: { accountKeys: Array<string | { pubkey: string }> } }
+  } | null,
+  maker: string,
+): string | null {
+  if (!tx?.meta || tx.meta.err) return null
+  const accounts = solanaAccountKeys(tx)
+  const idx = accounts.indexOf(maker)
+  if (idx < 0) return null
+  const pre = BigInt(tx.meta.preBalances[idx] ?? 0)
+  const post = BigInt(tx.meta.postBalances[idx] ?? 0)
+  const delta = post - pre
+  if (delta < SOLANA_MIN_FUND_LAMPORTS) return null
+
+  let best: string | null = null
+  let bestLoss = 0n
+  for (let index = 0; index < accounts.length; index += 1) {
+    if (index === idx) continue
+    const account = accounts[index]
+    if (!account || SOLANA_SKIP_ACCOUNTS.has(account)) continue
+    const loss = BigInt(tx.meta.preBalances[index] ?? 0) - BigInt(tx.meta.postBalances[index] ?? 0)
+    if (loss > bestLoss) {
+      bestLoss = loss
+      best = account
+    }
+  }
+  if (best && bestLoss >= SOLANA_MIN_FUND_LAMPORTS / 2n) return best
+  const feePayer = accounts[0]
+  if (feePayer && feePayer !== maker && !SOLANA_SKIP_ACCOUNTS.has(feePayer)) return feePayer
+  return null
+}
+
+function solanaAccountKeys(tx: {
+  meta: { loadedAddresses?: { writable?: string[]; readonly?: string[] } } | null
+  transaction: { message: { accountKeys: Array<string | { pubkey: string }> } }
+}): string[] {
+  const keys = tx.transaction.message.accountKeys.map((key) =>
+    typeof key === "string" ? key : key.pubkey || "",
+  )
+  const loaded = tx.meta?.loadedAddresses
+  return [...keys, ...(loaded?.writable ?? []), ...(loaded?.readonly ?? [])].filter(Boolean)
+}
+
+type SolSig = { signature: string; blockTime: number | null; err: unknown }
+
+async function solanaSignatures(rpcs: string[], address: string, before: string | null): Promise<SolSig[]> {
+  const options: Record<string, unknown> = { limit: SOLANA_SIG_PAGE }
+  if (before) options.before = before
+  const result = await solanaRpc(rpcs, "getSignaturesForAddress", [address, options])
+  if (!Array.isArray(result)) return []
+  return result.flatMap((row) => {
+    if (!row || typeof row !== "object") return []
+    const info = row as Record<string, unknown>
+    if (typeof info.signature !== "string") return []
+    return [
+      {
+        signature: info.signature,
+        blockTime: typeof info.blockTime === "number" ? info.blockTime : null,
+        err: info.err ?? null,
+      },
+    ]
+  })
+}
+
+async function solanaTransaction(rpcs: string[], signature: string) {
+  const result = await solanaRpc(rpcs, "getTransaction", [
+    signature,
+    { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
+  ])
+  if (!result || typeof result !== "object") return null
+  return result as {
+    meta: {
+      err: unknown
+      preBalances: number[]
+      postBalances: number[]
+      loadedAddresses?: { writable?: string[]; readonly?: string[] }
+    } | null
+    transaction: { message: { accountKeys: Array<string | { pubkey: string }> } }
+  }
+}
+
+async function solanaRpc(rpcs: string[], method: string, params: unknown[]): Promise<unknown> {
+  let last: Error | null = null
+  for (const rpc of rpcs) {
+    try {
+      const response = await fetch(rpc, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json", "user-agent": "PairSheet/1.0" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(18000),
+        cache: "no-store",
+      })
+      if (!response.ok) {
+        last = new Error(`Solana RPC ${response.status}`)
+        continue
+      }
+      const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
+      if (body.error?.message) {
+        last = new Error(body.error.message)
+        continue
+      }
+      return body.result
+    } catch (error) {
+      last = error instanceof Error ? error : new Error("Solana RPC failed")
+    }
+  }
+  throw last ?? new Error("Solana RPC failed")
 }
 
 async function fundingRows(chain: ChainConfig, maker: string): Promise<FundingRow[]> {

@@ -172,10 +172,27 @@ export function Exporter() {
     await Promise.all(Array.from({ length: 2 }, worker))
   }
 
-  async function lookUpFunders(chainId: string, makers: string[], token: number) {
+  async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []) {
     const chain = getChain(chainId)
-    if (!chain || chain.id === "solana") return
-    let pending = [...new Set(makers.map((maker) => maker.toLowerCase()).filter(Boolean))]
+    if (!chain) return
+    const solana = chain.id === "solana"
+    let pending = [
+      ...new Set(
+        makers
+          .map((maker) => (solana ? maker : maker.toLowerCase()))
+          .filter(Boolean),
+      ),
+    ]
+    const earliestTradeSec = new Map<string, number>()
+    if (solana) {
+      for (const trade of loaded) {
+        if (!trade.maker) continue
+        const ts = Math.floor(Date.parse(trade.timestamp) / 1000)
+        if (!Number.isFinite(ts)) continue
+        const prev = earliestTradeSec.get(trade.maker)
+        if (prev === undefined || ts < prev) earliestTradeSec.set(trade.maker, ts)
+      }
+    }
     const total = pending.length
     let done = 0
     if (total === 0) return
@@ -191,12 +208,18 @@ export function Exporter() {
           const batch = batches[next]
           next += 1
           try {
-            const { found, failed } = await resolveFunders(chain, batch, Date.now() + 45000)
+            const { found, failed } = await resolveFunders(
+              chain,
+              batch,
+              Date.now() + 45000,
+              solana ? earliestTradeSec : undefined,
+            )
             const missed = new Set(failed)
             if (run.current !== token) return
             setTrades((current) =>
               current.map((trade) => {
-                const match = found.get(trade.maker.toLowerCase())
+                const key = solana ? trade.maker : trade.maker.toLowerCase()
+                const match = found.get(key)
                 return match && !trade.fundedByAddress
                   ? { ...trade, fundedBy: match.label, fundedByAddress: match.address }
                   : trade
@@ -292,6 +315,7 @@ export function Exporter() {
         chainId,
         loaded.map((trade) => trade.maker),
         token,
+        loaded,
       )
     } catch (loadError) {
       if (run.current !== token) return
