@@ -48,7 +48,9 @@ Ethereum, Polygon, Base, Arbitrum, Optimism, Avalanche, Blast, zkSync, Celo, Uni
 
 BNB Chain, Linea, Scroll, Gnosis, and Mantle are recognized in DEXTools URLs, but this app does not have a public full-history index for them yet. Solana and other non-EVM DEXTools chains are not exported.
 
-Exports stop at 20,000 transactions and say so when a pool is larger.
+Exports stop at 50,000 transactions and say so when a pool is larger. Explorer APIs that only return 10,000 logs per query are walked in block windows so larger EVM pools still load past that ceiling.
+
+**Solana:** DEXTools Solana pair links are supported. Swaps are reconstructed from pool token-balance changes on each pool transaction (works across PumpSwap, Raydium, and similar AMMs). Funded-by / bot-tag lookups are EVM-only for now. Public Solana RPCs are rate-limited, so very busy pools load in pages and may take longer.
 
 **Uniswap V4:** DEXTools V4 links use a 32-byte pool id (not a pair contract). Pair Sheet reads `Swap` events from the Uniswap V4 PoolManager filtered by that pool id. Liquidity add/remove and per-swap pool-size columns are not available for V4 yet (swaps, makers, funding, and CSV export are). Native ETH quote sides are priced via the chain’s wrapped native token.
 

@@ -35,6 +35,7 @@ import {
   zonedPartsToUtc,
 } from "./timezone"
 import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
+import { decodeSolanaSwap } from "./solana"
 import { assignSync, recordSync, swapKey, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -91,6 +92,12 @@ test("parses DEXTools pair explorer links", () => {
   )
   assert.equal(v4.chain.id, "ether")
   assert.equal(v4.address, "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96")
+
+  const sol = parseDextoolsUrl(
+    "https://www.dextools.io/app/solana/pair-explorer/3xbJcFoEpBwnp1eGHpAKkKNmN5kk381F6KETjtEyxpX3",
+  )
+  assert.equal(sol.chain.id, "solana")
+  assert.equal(sol.address, "3xbJcFoEpBwnp1eGHpAKkKNmN5kk381F6KETjtEyxpX3")
 })
 
 test("rejects links that are not a pair explorer", () => {
@@ -124,6 +131,65 @@ test("decodes a v3 buy of token0", () => {
   assert.equal(swap.type, "BUY")
   assert.equal(swap.baseRaw, 2_000000000000000000n)
   assert.equal(swap.quoteRaw, 1_500000000000000000n)
+})
+
+test("decodes a solana pool swap from token balance deltas", () => {
+  const solPool: PoolContext = {
+    ...pool,
+    chainId: "solana",
+    chainName: "Solana",
+    address: "3xbJcFoEpBwnp1eGHpAKkKNmN5kk381F6KETjtEyxpX3",
+    logAddress: "3xbJcFoEpBwnp1eGHpAKkKNmN5kk381F6KETjtEyxpX3",
+    dex: "PumpSwap",
+    dexId: "pumpswap",
+    base: { address: "4Kgx3bNBfdA8DgPGSfAd1tTSEc9x6Qd3bTeTtoyQpump", symbol: "OpenBot", decimals: 6 },
+    quote: { address: "So11111111111111111111111111111111111111112", symbol: "SOL", decimals: 9 },
+    token0: "4Kgx3bNBfdA8DgPGSfAd1tTSEc9x6Qd3bTeTtoyQpump",
+    token1: "So11111111111111111111111111111111111111112",
+    explorerTx: "https://solscan.io/tx",
+    explorerAddress: "https://solscan.io/account",
+  }
+  const trade = decodeSolanaSwap(solPool, "sig123", {
+    slot: 10,
+    blockTime: 1_700_000_000,
+    meta: {
+      err: null,
+      preTokenBalances: [
+        {
+          accountIndex: 4,
+          mint: solPool.base.address,
+          owner: solPool.address,
+          uiTokenAmount: { amount: "1000000000", decimals: 6 },
+        },
+        {
+          accountIndex: 5,
+          mint: solPool.quote.address,
+          owner: solPool.address,
+          uiTokenAmount: { amount: "2000000000", decimals: 9 },
+        },
+      ],
+      postTokenBalances: [
+        {
+          accountIndex: 4,
+          mint: solPool.base.address,
+          owner: solPool.address,
+          uiTokenAmount: { amount: "900000000", decimals: 6 },
+        },
+        {
+          accountIndex: 5,
+          mint: solPool.quote.address,
+          owner: solPool.address,
+          uiTokenAmount: { amount: "2100000000", decimals: 9 },
+        },
+      ],
+    },
+    transaction: { message: { accountKeys: ["Maker1111111111111111111111111111111111111"] } },
+  })
+  assert.ok(trade)
+  assert.equal(trade.type, "BUY")
+  assert.equal(trade.baseAmount, "100")
+  assert.equal(trade.quoteAmount, "0.1")
+  assert.equal(trade.maker, "Maker1111111111111111111111111111111111111")
 })
 
 test("decodes a uniswap v4 swap with the same amount layout as v3", () => {

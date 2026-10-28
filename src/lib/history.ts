@@ -8,19 +8,12 @@ import { resolvePool } from "./pool"
 import { quotePricesAt } from "./prices"
 import { loadPoolSizes } from "./reserves"
 import type { PoolSize } from "./reserves"
-import type { PoolContext, PoolView, RawLog, SwapsResponse, Trade } from "./types"
+import { getSolanaSwapPage } from "./solana"
+import type { PoolContext, PoolView, RawLog, ServerCursor, SwapsResponse, Trade } from "./types"
 
 const ROUTESCAN_PAGE = 1000
-
-type ServerCursor = {
-  source: "routescan" | "blockscout"
-  topic: string
-  triedTopics: string[]
-  queue: string[]
-  page: number
-  blockscoutParams: Record<string, string> | null
-  pool: PoolContext
-}
+/** Etherscan-compatible getLogs only returns page*offset ≤ 10_000 rows per query window. */
+const MAX_LOG_PAGE = 10
 
 export async function getSwapPage(rawUrl: string, cursorText: string | null): Promise<SwapsResponse> {
   let parsed: ReturnType<typeof parseDextoolsUrl>
@@ -31,7 +24,7 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
   }
   if (!chainCanExport(parsed.chain)) {
     throw new AppError(
-      `${parsed.chain.name} does not have a public swap index this app can read yet. Full history works on Ethereum, Base, Arbitrum, Polygon, Optimism, Avalanche, Blast, zkSync, Celo, Unichain, World Chain, Metis, and Chiliz.`,
+      `${parsed.chain.name} does not have a public swap index this app can read yet. Full history works on Ethereum, Base, Arbitrum, Polygon, Optimism, Avalanche, Blast, zkSync, Celo, Unichain, World Chain, Metis, Chiliz, and Solana.`,
       422,
     )
   }
@@ -40,6 +33,11 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
   if (cursor && cursor.pool.address !== parsed.address) {
     throw new AppError("The continuation token does not match this pair.", 400)
   }
+
+  if (parsed.chain.id === "solana") {
+    return getSolanaSwapPage(parsed.chain, parsed.address, parsed.url, cursor)
+  }
+
   const pool = cursor?.pool ?? (await resolvePool(parsed.chain, parsed.address, parsed.url))
   const topics = topicOrder(pool.dexId, pool.dex, pool.style)
   const topic = cursor?.topic ?? topics[0]
@@ -73,8 +71,9 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
     followingTopic = queue[0]
     remaining = queue.slice(1)
     following = {
-      source: chain.routescan ? "routescan" : "blockscout",
+      source: chain.routescan ? ("routescan" as const) : ("blockscout" as const),
       page: 1,
+      toBlock: null,
       blockscoutParams: null,
     }
   }
@@ -86,6 +85,7 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
         triedTopics: [...tried],
         queue: remaining,
         page: following.page,
+        toBlock: following.toBlock ?? null,
         blockscoutParams: following.blockscoutParams,
         pool,
       })
@@ -128,7 +128,12 @@ function toView(pool: PoolContext): PoolView {
 
 type PageResult = {
   logs: RawLog[]
-  next: { source: "routescan" | "blockscout"; page: number; blockscoutParams: Record<string, string> | null } | null
+  next: {
+    source: "routescan" | "blockscout"
+    page: number
+    toBlock?: number | null
+    blockscoutParams: Record<string, string> | null
+  } | null
 }
 
 async function readPage(
@@ -138,15 +143,16 @@ async function readPage(
   cursor: ServerCursor | null,
 ): Promise<PageResult> {
   const source = cursor?.source ?? (chain.routescan ? "routescan" : "blockscout")
+  const toBlock = cursor?.toBlock ?? null
   if (source === "routescan") {
-    return readRoutescan(chain, pool, topic, cursor?.page ?? 1)
+    return readRoutescan(chain, pool, topic, cursor?.page ?? 1, toBlock)
   }
   if (!chain.blockscout) {
     throw new AppError(`No swap index is configured for ${chain.name}.`, 422)
   }
   // V4 needs topic1 (pool id). Prefer the Etherscan-compatible module which supports it.
   if (pool.topic1) {
-    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, cursor?.page ?? 1)
+    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, cursor?.page ?? 1, toBlock)
   }
   return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
 }
@@ -156,13 +162,14 @@ async function readRoutescan(
   pool: PoolContext,
   topic: string,
   page: number,
+  toBlock: number | null = null,
 ): Promise<PageResult> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: pool.logAddress,
     fromBlock: "0",
-    toBlock: "latest",
+    toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
     topic0: topic,
     page: String(page),
     offset: String(ROUTESCAN_PAGE),
@@ -175,10 +182,10 @@ async function readRoutescan(
   const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
   if (!Array.isArray(body.result)) {
     const message = String(body.result || body.message || "no records")
-    if (/no records|no logs|chain not supported/i.test(message)) {
+    if (/no records|no logs|chain not supported|invalid/i.test(message)) {
       if (/chain not supported/i.test(message) && chain.blockscout) {
         if (pool.topic1) {
-          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1)
+          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, toBlock)
         }
         return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
       }
@@ -187,11 +194,7 @@ async function readRoutescan(
     throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
   }
   const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
-  const next =
-    logs.length >= ROUTESCAN_PAGE
-      ? { source: "routescan" as const, page: page + 1, blockscoutParams: null }
-      : null
-  return { logs, next }
+  return { logs, next: nextLogPage("routescan", page, toBlock, logs) }
 }
 
 async function readEtherscanLogs(
@@ -199,13 +202,14 @@ async function readEtherscanLogs(
   pool: PoolContext,
   topic: string,
   page: number,
+  toBlock: number | null = null,
 ): Promise<PageResult> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: pool.logAddress,
     fromBlock: "0",
-    toBlock: "latest",
+    toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
     topic0: topic,
     page: String(page),
     offset: String(ROUTESCAN_PAGE),
@@ -218,15 +222,28 @@ async function readEtherscanLogs(
   const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
   if (!Array.isArray(body.result)) {
     const message = String(body.result || body.message || "no records")
-    if (/no records|no logs|not found/i.test(message)) return { logs: [], next: null }
+    if (/no records|no logs|not found|invalid/i.test(message)) return { logs: [], next: null }
     throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
   }
   const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
-  const next =
-    logs.length >= ROUTESCAN_PAGE
-      ? { source: "blockscout" as const, page: page + 1, blockscoutParams: null }
-      : null
-  return { logs, next }
+  return { logs, next: nextLogPage("blockscout", page, toBlock, logs) }
+}
+
+function nextLogPage(
+  source: "routescan" | "blockscout",
+  page: number,
+  toBlock: number | null,
+  logs: RawLog[],
+): PageResult["next"] {
+  if (logs.length === 0) return null
+  if (logs.length < ROUTESCAN_PAGE) return null
+  // Hit the 10k result ceiling for this from/to window — slide toBlock down and restart pages.
+  if (page >= MAX_LOG_PAGE) {
+    const oldest = Math.min(...logs.map((log) => log.blockNumber).filter((block) => block > 0))
+    if (!Number.isFinite(oldest) || oldest <= 1) return null
+    return { source, page: 1, toBlock: oldest - 1, blockscoutParams: null }
+  }
+  return { source, page: page + 1, toBlock: toBlock ?? null, blockscoutParams: null }
 }
 
 function routescanLog(row: unknown): RawLog | null {
@@ -432,7 +449,10 @@ function encodeCursor(cursor: ServerCursor): string {
 function decodeCursor(value: string): ServerCursor {
   try {
     const parsed = JSON.parse(decodeBase64Url(value)) as ServerCursor
-    if (!parsed?.pool?.address || !parsed.topic || !parsed.source) {
+    if (!parsed?.pool?.address || !parsed.source) {
+      throw new Error("incomplete")
+    }
+    if (parsed.source !== "solana" && !parsed.topic) {
       throw new Error("incomplete")
     }
     return parsed

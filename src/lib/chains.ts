@@ -16,6 +16,22 @@ export type ChainConfig = {
 
 export const CHAINS: ChainConfig[] = [
   {
+    id: "solana",
+    name: "Solana",
+    chainId: 101,
+    gecko: "solana",
+    llama: "solana",
+    rpcs: [
+      "https://solana-rpc.publicnode.com",
+      "https://api.mainnet-beta.solana.com",
+    ],
+    blockscout: null,
+    routescan: false,
+    explorer: "https://solscan.io",
+    v4PoolManager: null,
+    wrappedNative: "So11111111111111111111111111111111111111112",
+  },
+  {
     id: "ether",
     name: "Ethereum",
     chainId: 1,
@@ -262,7 +278,7 @@ export function getChain(id: string): ChainConfig | undefined {
 }
 
 export function chainCanExport(chain: ChainConfig): boolean {
-  return chain.routescan || Boolean(chain.blockscout)
+  return chain.id === "solana" || chain.routescan || Boolean(chain.blockscout)
 }
 
 export function supportedChainNames(): string[] {

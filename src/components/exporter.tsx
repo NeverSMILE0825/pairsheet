@@ -22,6 +22,7 @@ import {
   formatIncome,
   formatTiny,
   formatUsd,
+  normalizeAddress,
   shortAddress,
   sumDecimals,
 } from "@/lib/format"
@@ -44,7 +45,8 @@ import type { PoolView, SwapsResponse, Trade } from "@/lib/types"
 
 type PeriodFilter = { startMs: number; endMs: number }
 
-const MAX_TRADES = 20000
+/** Soft cap so a single browser session stays responsive; explorer windows can exceed 10k. */
+const MAX_TRADES = 50000
 const ZONE_KEY = "pairsheet.timezone"
 const PAGE_SIZES = [25, 50, 100, 250]
 const WALLET_BATCH = 12
@@ -143,7 +145,7 @@ export function Exporter() {
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
     const chain = getChain(chainId)
-    if (!chain) return
+    if (!chain || chain.id === "solana") return
     const routers = routersToCheck(loaded, view.address, WALLET_ROUTER_LIMIT)
     const batches = chunk(routers, WALLET_BATCH)
     if (batches.length === 0) batches.push([])
@@ -172,7 +174,7 @@ export function Exporter() {
 
   async function lookUpFunders(chainId: string, makers: string[], token: number) {
     const chain = getChain(chainId)
-    if (!chain) return
+    if (!chain || chain.id === "solana") return
     let pending = [...new Set(makers.map((maker) => maker.toLowerCase()).filter(Boolean))]
     const total = pending.length
     let done = 0
@@ -1050,7 +1052,7 @@ export function Exporter() {
                               <MakerCountButton
                                 maker={trade.maker}
                                 count={trade.makerTxCount}
-                                summary={makerSummaries.get(trade.maker.toLowerCase()) ?? null}
+                                summary={makerSummaries.get(normalizeAddress(trade.maker)) ?? null}
                                 baseSymbol={pool.baseSymbol}
                                 quoteSymbol={pool.quoteSymbol}
                                 priceUsd={pool.priceUsd}

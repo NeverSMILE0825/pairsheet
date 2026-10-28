@@ -221,6 +221,11 @@ export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`
 }
 
+/** EVM hex addresses are case-insensitive; Solana base58 addresses are not. */
+export function normalizeAddress(address: string): string {
+  return /^0x[a-fA-F0-9]+$/.test(address) ? address.toLowerCase() : address
+}
+
 export function compareDecimal(a: string, b: string): number {
   const aNeg = a.startsWith("-")
   const bNeg = b.startsWith("-")

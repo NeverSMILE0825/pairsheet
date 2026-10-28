@@ -73,7 +73,7 @@ async function loadChart(
   const min = Math.min(...timestamps)
   const max = Math.max(...timestamps)
   const hours = Math.ceil((max - min) / 3600) + 3
-  const coin = `${llamaChain}:${tokenAddress.toLowerCase()}`
+  const coin = `${llamaChain}:${/^0x/i.test(tokenAddress) ? tokenAddress.toLowerCase() : tokenAddress}`
 
   if (hours <= 168) {
     return fetchChart(coin, min - 3600, hours, "1h")

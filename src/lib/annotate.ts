@@ -1,3 +1,4 @@
+import { normalizeAddress } from "./format"
 import type { ContractInfo } from "./wallets"
 import type { MakerTag, Trade } from "./types"
 
@@ -12,8 +13,8 @@ export const EMPTY_FACTS: WalletFacts = { contracts: {}, deployer: null }
 export function routersToCheck(trades: Trade[], poolAddress: string, limit: number): string[] {
   const counts = new Map<string, number>()
   for (const trade of trades) {
-    const router = trade.router.toLowerCase()
-    if (!router || router === poolAddress.toLowerCase()) continue
+    const router = normalizeAddress(trade.router)
+    if (!router || router === normalizeAddress(poolAddress)) continue
     counts.set(router, (counts.get(router) ?? 0) + 1)
   }
   return [...counts.entries()]
@@ -30,7 +31,7 @@ export function annotateTrades(trades: Trade[], poolAddress: string, facts: Wall
   const counts = new Map<string, number>()
   let firstLiquidity: Trade | null = null
   for (const trade of trades) {
-    const maker = trade.maker.toLowerCase()
+    const maker = normalizeAddress(trade.maker)
     if (maker) counts.set(maker, (counts.get(maker) ?? 0) + 1)
     if (trade.type === "ADD" && trade.maker) {
       if (
@@ -43,15 +44,15 @@ export function annotateTrades(trades: Trade[], poolAddress: string, facts: Wall
     }
   }
   const teamWallets = new Set<string>()
-  if (facts.deployer) teamWallets.add(facts.deployer.toLowerCase())
-  if (firstLiquidity) teamWallets.add(firstLiquidity.maker.toLowerCase())
+  if (facts.deployer) teamWallets.add(normalizeAddress(facts.deployer))
+  if (firstLiquidity) teamWallets.add(normalizeAddress(firstLiquidity.maker))
 
   const tagged = trades.map((trade) => {
-    const maker = trade.maker.toLowerCase()
-    const router = trade.router.toLowerCase()
+    const maker = normalizeAddress(trade.maker)
+    const router = normalizeAddress(trade.router)
     const info = router ? facts.contracts[router] : undefined
     const tags: MakerTag[] = []
-    if (router && (router === poolAddress.toLowerCase() || (info?.contract && !info.verified))) tags.push("bot")
+    if (router && (router === normalizeAddress(poolAddress) || (info?.contract && !info.verified))) tags.push("bot")
     if (maker && teamWallets.has(maker)) tags.push("team")
     return { ...trade, makerTxCount: counts.get(maker) ?? 0, makerTags: tags }
   })

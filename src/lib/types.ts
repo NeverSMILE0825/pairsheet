@@ -82,6 +82,18 @@ export type SwapsResponse = {
   warning: string | null
 }
 
+export type ServerCursor = {
+  source: "routescan" | "blockscout" | "solana"
+  topic: string
+  triedTopics: string[]
+  queue: string[]
+  page: number
+  toBlock?: number | null
+  before?: string | null
+  blockscoutParams: Record<string, string> | null
+  pool: PoolContext
+}
+
 export type RawLog = {
   data: string
   topics: string[]

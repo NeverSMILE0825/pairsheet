@@ -1,4 +1,4 @@
-import { compareDecimal, decimalRatio, mulDecimals, sumDecimals } from "./format"
+import { compareDecimal, decimalRatio, mulDecimals, normalizeAddress, sumDecimals } from "./format"
 import type { Trade } from "./types"
 
 export type MakerSummary = {
@@ -20,7 +20,7 @@ export type MakerSummary = {
 export function summarizeMakers(trades: Trade[]): Map<string, MakerSummary> {
   const groups = new Map<string, Trade[]>()
   for (const trade of trades) {
-    const key = trade.maker.toLowerCase()
+    const key = normalizeAddress(trade.maker)
     if (!key) continue
     const rows = groups.get(key)
     if (rows) rows.push(trade)
