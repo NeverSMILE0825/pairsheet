@@ -43,6 +43,7 @@ export async function quotePricesAt(
   tokenAddress: string,
   symbol: string,
   timestamps: number[],
+  wrappedNative: string | null = null,
 ): Promise<Map<number, number | null>> {
   const prices = new Map<number, number | null>()
   if (timestamps.length === 0) return prices
@@ -51,11 +52,17 @@ export async function quotePricesAt(
     return prices
   }
 
-  const points = await loadChart(llamaChain, tokenAddress, timestamps)
+  const priced =
+    isNativeAddress(tokenAddress) && wrappedNative ? wrappedNative : tokenAddress
+  const points = await loadChart(llamaChain, priced, timestamps)
   for (const timestamp of timestamps) {
     prices.set(timestamp, nearestPrice(points, timestamp))
   }
   return prices
+}
+
+function isNativeAddress(address: string): boolean {
+  return /^0x0{40}$/i.test(address)
 }
 
 async function loadChart(

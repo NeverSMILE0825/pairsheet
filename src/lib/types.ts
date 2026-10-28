@@ -8,10 +8,18 @@ export type TokenInfo = {
   decimals: number
 }
 
+export type PoolStyle = "pair" | "v4"
+
 export type PoolContext = {
   chainId: string
   chainName: string
+  /** Pair contract (v2/v3) or Uniswap V4 pool id (bytes32). */
   address: string
+  /** Contract that emits the swap logs (pair itself, or V4 PoolManager). */
+  logAddress: string
+  /** Extra topic1 filter for V4 (pool id); null for pair-style pools. */
+  topic1: string | null
+  style: PoolStyle
   dex: string
   dexId: string
   base: TokenInfo

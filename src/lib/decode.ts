@@ -5,6 +5,9 @@ export const SWAP_V2_TOPIC =
   "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"
 export const SWAP_V3_TOPIC =
   "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+/** Uniswap V4 PoolManager: Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24) */
+export const SWAP_V4_TOPIC =
+  "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
 
 export const MINT_V2_TOPIC =
   "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f"
@@ -22,9 +25,9 @@ export function isV2Family(topic: string): boolean {
 }
 
 export function liquidityTopics(swapTopic: string): string[] {
-  return swapTopic.toLowerCase() === SWAP_V3_TOPIC
-    ? [MINT_V3_TOPIC, BURN_V3_TOPIC]
-    : [MINT_V2_TOPIC, BURN_V2_TOPIC]
+  const topic = swapTopic.toLowerCase()
+  if (topic === SWAP_V4_TOPIC) return []
+  return topic === SWAP_V3_TOPIC ? [MINT_V3_TOPIC, BURN_V3_TOPIC] : [MINT_V2_TOPIC, BURN_V2_TOPIC]
 }
 
 export type DecodedSwap = {
@@ -33,8 +36,11 @@ export type DecodedSwap = {
   quoteRaw: bigint
 }
 
-export function topicOrder(dexId: string, dexName: string): string[] {
+export function topicOrder(dexId: string, dexName: string, style?: string): string[] {
   const label = `${dexId} ${dexName}`.toLowerCase()
+  if (style === "v4" || /uniswap-v4|(^|[^0-9])v4([^0-9]|$)/.test(label)) {
+    return [SWAP_V4_TOPIC]
+  }
   const concentrated = /v3|algebra|slipstream|concentrated/.test(label)
   return concentrated
     ? [SWAP_V3_TOPIC, SWAP_V2_TOPIC]
@@ -64,6 +70,10 @@ export function decodeSwap(log: RawLog, pool: PoolContext): DecodedSwap | null {
   const topic = (log.topics[0] || "").toLowerCase()
   if (topic === SWAP_V2_TOPIC) return decodeV2(log.data, pool)
   if (topic === SWAP_V3_TOPIC) return decodeV3(log.data, pool)
+  if (topic === SWAP_V4_TOPIC) {
+    if (pool.topic1 && (log.topics[1] || "").toLowerCase() !== pool.topic1.toLowerCase()) return null
+    return decodeV3(log.data, pool)
+  }
   if (topic === MINT_V2_TOPIC) return decodeLiquidity(log.data, pool, 0, "ADD")
   if (topic === BURN_V2_TOPIC) return decodeLiquidity(log.data, pool, 0, "REMOVE")
   if (topic === MINT_V3_TOPIC) return decodeLiquidity(log.data, pool, 2, "ADD")

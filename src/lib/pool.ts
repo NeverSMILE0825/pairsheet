@@ -2,7 +2,9 @@ import type { ChainConfig } from "./chains"
 import { decodeAbiString, sameAddress } from "./decode"
 import { AppError, fetchJson, rpcCall } from "./http"
 import { isStableSymbol } from "./prices"
-import type { PoolContext, TokenInfo } from "./types"
+import type { PoolContext, PoolStyle, TokenInfo } from "./types"
+
+const NATIVE = "0x0000000000000000000000000000000000000000"
 
 const WRAPPED = new Set([
   "weth",
@@ -19,6 +21,11 @@ const WRAPPED = new Set([
   "wpulse",
   "wmetis",
   "wsonic",
+  "eth",
+  "bnb",
+  "matic",
+  "pol",
+  "avax",
 ])
 
 type GeckoPool = {
@@ -31,17 +38,26 @@ type GeckoPool = {
   reserveUsd: string | null
 }
 
+export function isPoolId(address: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(address)
+}
+
+export function isNativeToken(address: string): boolean {
+  return address.toLowerCase() === NATIVE
+}
+
 export async function resolvePool(
   chain: ChainConfig,
   address: string,
   dextoolsUrl: string,
 ): Promise<PoolContext> {
-  const [gecko, code] = await Promise.all([
-    loadGecko(chain, address),
-    chain.rpcs.length
-      ? rpcCall(chain.rpcs, "eth_getCode", [address, "latest"]).catch(() => "0x1")
-      : Promise.resolve("0x1"),
-  ])
+  const gecko = await loadGecko(chain, address)
+  const v4Hint = isPoolId(address) || /uniswap-v4|v4/i.test(gecko?.dexId || gecko?.dex || "")
+  if (v4Hint) return resolveV4Pool(chain, address, dextoolsUrl, gecko)
+
+  const code = chain.rpcs.length
+    ? await rpcCall(chain.rpcs, "eth_getCode", [address, "latest"]).catch(() => "0x1")
+    : "0x1"
 
   if (code === "0x" || code === "0x0") {
     throw new AppError(`That address is not a contract on ${chain.name}.`, 404)
@@ -80,6 +96,9 @@ export async function resolvePool(
     chainId: chain.id,
     chainName: chain.name,
     address,
+    logAddress: address,
+    topic1: null,
+    style: "pair",
     dex: gecko?.dex || "DEX pair",
     dexId: gecko?.dexId || "",
     base: sides.base,
@@ -93,6 +112,54 @@ export async function resolvePool(
     explorerTx: `${chain.explorer}/tx`,
     explorerAddress: `${chain.explorer}/address`,
   }
+}
+
+function resolveV4Pool(
+  chain: ChainConfig,
+  poolId: string,
+  dextoolsUrl: string,
+  gecko: GeckoPool | null,
+): PoolContext {
+  if (!chain.v4PoolManager) {
+    throw new AppError(
+      `Uniswap V4 pools are not supported on ${chain.name} yet (no PoolManager mapped for this chain).`,
+      422,
+    )
+  }
+  if (!gecko) {
+    throw new AppError(
+      "Could not resolve this Uniswap V4 pool. Check the DEXTools link, or try again in a moment.",
+      404,
+    )
+  }
+
+  const [token0, token1] = orderByAddress(gecko.base, gecko.quote)
+  const sides = pickSides(token0, token1, gecko)
+
+  return {
+    chainId: chain.id,
+    chainName: chain.name,
+    address: poolId.toLowerCase(),
+    logAddress: chain.v4PoolManager.toLowerCase(),
+    topic1: poolId.toLowerCase(),
+    style: "v4" satisfies PoolStyle,
+    dex: gecko.dex || "Uniswap V4",
+    dexId: gecko.dexId || "uniswap-v4",
+    base: sides.base,
+    quote: sides.quote,
+    token0: token0.address,
+    token1: token1.address,
+    createdAt: gecko.createdAt,
+    priceUsd: gecko.priceUsd,
+    reserveUsd: gecko.reserveUsd,
+    dextoolsUrl,
+    explorerTx: `${chain.explorer}/tx`,
+    explorerAddress: `${chain.explorer}/address`,
+  }
+}
+
+function orderByAddress(a: TokenInfo, b: TokenInfo): [TokenInfo, TokenInfo] {
+  return a.address.toLowerCase() < b.address.toLowerCase() ? [a, b] : [b, a]
 }
 
 function mergeToken(token: TokenInfo, known: TokenInfo[]): TokenInfo {
@@ -115,8 +182,8 @@ function pickSides(
     const quote = [token0, token1].find((token) => sameAddress(token.address, gecko.quote.address))
     if (base && quote && !sameAddress(base.address, quote.address)) return { base, quote }
   }
-  const quote0 = isQuoteToken(token0.symbol)
-  const quote1 = isQuoteToken(token1.symbol)
+  const quote0 = isQuoteToken(token0.symbol) || isNativeToken(token0.address)
+  const quote1 = isQuoteToken(token1.symbol) || isNativeToken(token1.address)
   if (quote0 && !quote1) return { base: token1, quote: token0 }
   if (quote1 && !quote0) return { base: token0, quote: token1 }
   return { base: token0, quote: token1 }
@@ -141,6 +208,7 @@ async function readToken(chain: ChainConfig, pool: string, selector: "0x0dfe1681
 }
 
 async function readSymbol(chain: ChainConfig, token: string): Promise<string> {
+  if (isNativeToken(token)) return "ETH"
   try {
     const raw = await rpcCall(chain.rpcs, "eth_call", [{ to: token, data: "0x95d89b41" }, "latest"])
     if (typeof raw !== "string") return shortToken(token)
@@ -152,6 +220,7 @@ async function readSymbol(chain: ChainConfig, token: string): Promise<string> {
 }
 
 async function readDecimals(chain: ChainConfig, token: string): Promise<number> {
+  if (isNativeToken(token)) return 18
   try {
     const raw = await rpcCall(chain.rpcs, "eth_call", [{ to: token, data: "0x313ce567" }, "latest"])
     if (typeof raw !== "string") return 18
@@ -199,9 +268,10 @@ async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool
 
 function tokenFromGecko(attributes: Record<string, unknown>): TokenInfo {
   const decimals = Number(attributes.decimals)
+  const address = String(attributes.address || "").toLowerCase()
   return {
-    address: String(attributes.address || "").toLowerCase(),
-    symbol: String(attributes.symbol || "TOKEN"),
+    address: address || NATIVE,
+    symbol: String(attributes.symbol || (isNativeToken(address) ? "ETH" : "TOKEN")),
     decimals: Number.isInteger(decimals) ? decimals : 18,
   }
 }

@@ -8,6 +8,10 @@ export type ChainConfig = {
   blockscout: string | null
   routescan: boolean
   explorer: string
+  /** Uniswap V4 PoolManager singleton, when deployed on this chain. */
+  v4PoolManager: string | null
+  /** Wrapped native token used to price native ETH/… quote sides. */
+  wrappedNative: string | null
 }
 
 export const CHAINS: ChainConfig[] = [
@@ -25,6 +29,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://eth.blockscout.com",
     routescan: true,
     explorer: "https://etherscan.io",
+    v4PoolManager: "0x000000000004444c5dc75cb358380d2e3de08a90",
+    wrappedNative: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
   },
   {
     id: "bnb",
@@ -36,6 +42,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: false,
     explorer: "https://bscscan.com",
+    v4PoolManager: null,
+    wrappedNative: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
   },
   {
     id: "polygon",
@@ -47,6 +55,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://polygon.blockscout.com",
     routescan: false,
     explorer: "https://polygonscan.com",
+    v4PoolManager: "0x67366782805870060151383f4bbff9dab53e5cd6",
+    wrappedNative: "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
   },
   {
     id: "base",
@@ -58,6 +68,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://base.blockscout.com",
     routescan: false,
     explorer: "https://basescan.org",
+    v4PoolManager: "0x498581ff718922c3f8e6a244956af099b2652b2b",
+    wrappedNative: "0x4200000000000000000000000000000000000006",
   },
   {
     id: "arbitrum",
@@ -69,6 +81,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://arbitrum.blockscout.com",
     routescan: false,
     explorer: "https://arbiscan.io",
+    v4PoolManager: "0x360e68faccca8ca495c1b759fd9eee466db9fb32",
+    wrappedNative: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
   },
   {
     id: "optimism",
@@ -80,6 +94,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://explorer.optimism.io",
     routescan: false,
     explorer: "https://optimistic.etherscan.io",
+    v4PoolManager: "0x9a13f98cb987694c9f086b1f5eb990eea8264ec3",
+    wrappedNative: "0x4200000000000000000000000000000000000006",
   },
   {
     id: "avalanche",
@@ -91,6 +107,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: true,
     explorer: "https://snowtrace.io",
+    v4PoolManager: null,
+    wrappedNative: "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7",
   },
   {
     id: "linea",
@@ -102,6 +120,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: false,
     explorer: "https://lineascan.build",
+    v4PoolManager: null,
+    wrappedNative: "0xe5d7c2a44ffddf6b295a15c1481679a3bdfbd41bf",
   },
   {
     id: "scroll",
@@ -113,6 +133,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: false,
     explorer: "https://scrollscan.com",
+    v4PoolManager: null,
+    wrappedNative: "0x5300000000000000000000000000000000000004",
   },
   {
     id: "blast",
@@ -124,6 +146,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: true,
     explorer: "https://blastscan.io",
+    v4PoolManager: null,
+    wrappedNative: "0x4300000000000000000000000000000000000004",
   },
   {
     id: "zksync",
@@ -135,6 +159,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://zksync.blockscout.com",
     routescan: false,
     explorer: "https://explorer.zksync.io",
+    v4PoolManager: null,
+    wrappedNative: "0x5aea5775959fbc2557cc8789bc1bf90a239d9a91",
   },
   {
     id: "celo",
@@ -146,6 +172,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://celo.blockscout.com",
     routescan: false,
     explorer: "https://celoscan.io",
+    v4PoolManager: null,
+    wrappedNative: "0x471ece3750da441af08b6a1a49bb4d4a6d00c95b",
   },
   {
     id: "unichain",
@@ -157,6 +185,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://unichain.blockscout.com",
     routescan: false,
     explorer: "https://uniscan.xyz",
+    v4PoolManager: null,
+    wrappedNative: "0x4200000000000000000000000000000000000006",
   },
   {
     id: "worldchain",
@@ -168,6 +198,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://worldchain-mainnet.explorer.alchemy.com",
     routescan: false,
     explorer: "https://worldchain-mainnet.explorer.alchemy.com",
+    v4PoolManager: null,
+    wrappedNative: "0x4200000000000000000000000000000000000006",
   },
   {
     id: "gnosis",
@@ -179,6 +211,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: false,
     explorer: "https://gnosisscan.io",
+    v4PoolManager: null,
+    wrappedNative: "0xe91d153e0b41518a2ce8dd3d8169cee6dadedf70",
   },
   {
     id: "mantle",
@@ -190,6 +224,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: false,
     explorer: "https://mantlescan.xyz",
+    v4PoolManager: null,
+    wrappedNative: "0x78c1b0c915c4faa5fffa6cabf0219da63d7f4cb8",
   },
   {
     id: "metis",
@@ -201,6 +237,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: "https://andromeda-explorer.metis.io",
     routescan: false,
     explorer: "https://andromeda-explorer.metis.io",
+    v4PoolManager: null,
+    wrappedNative: "0x75cb093e4d61d2a2e65d8e0bbb01de8d89b53481",
   },
   {
     id: "chiliz",
@@ -212,6 +250,8 @@ export const CHAINS: ChainConfig[] = [
     blockscout: null,
     routescan: true,
     explorer: "https://chiliscan.com",
+    v4PoolManager: null,
+    wrappedNative: null,
   },
 ]
 

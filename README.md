@@ -50,6 +50,8 @@ BNB Chain, Linea, Scroll, Gnosis, and Mantle are recognized in DEXTools URLs, bu
 
 Exports stop at 20,000 transactions and say so when a pool is larger.
 
+**Uniswap V4:** DEXTools V4 links use a 32-byte pool id (not a pair contract). Pair Sheet reads `Swap` events from the Uniswap V4 PoolManager filtered by that pool id. Liquidity add/remove and per-swap pool-size columns are not available for V4 yet (swaps, makers, funding, and CSV export are). Native ETH quote sides are priced via the chain’s wrapped native token.
+
 ## How a link is read
 
 `https://www.dextools.io/app/{chain}/pair-explorer/{pool}`

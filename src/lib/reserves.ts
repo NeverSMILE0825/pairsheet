@@ -28,6 +28,8 @@ export async function loadPoolSizes(
   logs: RawLog[],
 ): Promise<Map<string, PoolSize>> {
   const sizes = new Map<string, PoolSize>()
+  // V4 pools live inside PoolManager; per-swap reserves are not available the V2/V3 way.
+  if (pool.style === "v4") return sizes
   const v2 = logs.filter((log) => isV2Family(log.topics[0] || ""))
   const v3 = logs.filter((log) => !isV2Family(log.topics[0] || ""))
   await Promise.all([fillFromSync(chain, pool, v2, sizes), fillFromBalances(chain, pool, v3, sizes)])

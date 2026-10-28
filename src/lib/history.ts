@@ -41,12 +41,12 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
     throw new AppError("The continuation token does not match this pair.", 400)
   }
   const pool = cursor?.pool ?? (await resolvePool(parsed.chain, parsed.address, parsed.url))
-  const topics = topicOrder(pool.dexId, pool.dex)
+  const topics = topicOrder(pool.dexId, pool.dex, pool.style)
   const topic = cursor?.topic ?? topics[0]
   const tried = new Set(cursor?.triedTopics ?? [topic])
 
   const chain = parsed.chain
-  const page = await readPage(parsed.chain, pool.address, topic, cursor)
+  const page = await readPage(parsed.chain, pool, topic, cursor)
   let trades = await hydrate(parsed.chain, pool, page.logs)
   let next = page.next
   let activeTopic = topic
@@ -55,7 +55,7 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
     for (const alternate of topics) {
       if (tried.has(alternate)) continue
       tried.add(alternate)
-      const retry = await readPage(parsed.chain, pool.address, alternate, null)
+      const retry = await readPage(parsed.chain, pool, alternate, null)
       if (retry.logs.length > 0 || retry.next) {
         trades = await hydrate(parsed.chain, pool, retry.logs)
         next = retry.next
@@ -133,43 +133,54 @@ type PageResult = {
 
 async function readPage(
   chain: ChainConfig,
-  address: string,
+  pool: PoolContext,
   topic: string,
   cursor: ServerCursor | null,
 ): Promise<PageResult> {
   const source = cursor?.source ?? (chain.routescan ? "routescan" : "blockscout")
   if (source === "routescan") {
-    return readRoutescan(chain, address, topic, cursor?.page ?? 1)
+    return readRoutescan(chain, pool, topic, cursor?.page ?? 1)
   }
   if (!chain.blockscout) {
     throw new AppError(`No swap index is configured for ${chain.name}.`, 422)
   }
-  return readBlockscout(chain.blockscout, address, topic, cursor?.blockscoutParams ?? null)
+  // V4 needs topic1 (pool id). Prefer the Etherscan-compatible module which supports it.
+  if (pool.topic1) {
+    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, cursor?.page ?? 1)
+  }
+  return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
 }
 
 async function readRoutescan(
   chain: ChainConfig,
-  address: string,
+  pool: PoolContext,
   topic: string,
   page: number,
 ): Promise<PageResult> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
-    address,
+    address: pool.logAddress,
     fromBlock: "0",
     toBlock: "latest",
     topic0: topic,
     page: String(page),
     offset: String(ROUTESCAN_PAGE),
   })
+  if (pool.topic1) {
+    params.set("topic1", pool.topic1)
+    params.set("topic0_1_opr", "and")
+  }
   const url = `https://api.routescan.io/v2/network/mainnet/evm/${chain.chainId}/etherscan/api?${params}`
   const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
   if (!Array.isArray(body.result)) {
     const message = String(body.result || body.message || "no records")
     if (/no records|no logs|chain not supported/i.test(message)) {
       if (/chain not supported/i.test(message) && chain.blockscout) {
-        return readBlockscout(chain.blockscout, address, topic, null)
+        if (pool.topic1) {
+          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1)
+        }
+        return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
       }
       return { logs: [], next: null }
     }
@@ -179,6 +190,41 @@ async function readRoutescan(
   const next =
     logs.length >= ROUTESCAN_PAGE
       ? { source: "routescan" as const, page: page + 1, blockscoutParams: null }
+      : null
+  return { logs, next }
+}
+
+async function readEtherscanLogs(
+  apiBase: string,
+  pool: PoolContext,
+  topic: string,
+  page: number,
+): Promise<PageResult> {
+  const params = new URLSearchParams({
+    module: "logs",
+    action: "getLogs",
+    address: pool.logAddress,
+    fromBlock: "0",
+    toBlock: "latest",
+    topic0: topic,
+    page: String(page),
+    offset: String(ROUTESCAN_PAGE),
+  })
+  if (pool.topic1) {
+    params.set("topic1", pool.topic1)
+    params.set("topic0_1_opr", "and")
+  }
+  const url = `${apiBase}/api?${params}`
+  const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
+  if (!Array.isArray(body.result)) {
+    const message = String(body.result || body.message || "no records")
+    if (/no records|no logs|not found/i.test(message)) return { logs: [], next: null }
+    throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
+  }
+  const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
+  const next =
+    logs.length >= ROUTESCAN_PAGE
+      ? { source: "blockscout" as const, page: page + 1, blockscoutParams: null }
       : null
   return { logs, next }
 }
@@ -269,6 +315,7 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       pool.quote.address,
       pool.quote.symbol,
       decoded.map((row) => row.log.timestamp),
+      chain.wrappedNative,
     ),
     loadPoolSizes(
       chain,

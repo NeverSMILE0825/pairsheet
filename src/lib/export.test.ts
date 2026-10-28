@@ -1,7 +1,18 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { csvFilename, tradesToCsv } from "./csv"
-import { BURN_V3_TOPIC, MINT_V2_TOPIC, SWAP_V2_TOPIC, decodeAbiString, decodeSwap, decodeV2, decodeV3, liquidityTopics } from "./decode"
+import {
+  BURN_V3_TOPIC,
+  MINT_V2_TOPIC,
+  SWAP_V2_TOPIC,
+  SWAP_V4_TOPIC,
+  decodeAbiString,
+  decodeSwap,
+  decodeV2,
+  decodeV3,
+  liquidityTopics,
+  topicOrder,
+} from "./decode"
 import {
   formatIntegerAmount,
   formatPoolSize,
@@ -32,6 +43,9 @@ const pool: PoolContext = {
   chainId: "ether",
   chainName: "Ethereum",
   address: "0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
+  logAddress: "0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
+  topic1: null,
+  style: "pair",
   dex: "Uniswap V2",
   dexId: "uniswap_v2",
   base: {
@@ -71,6 +85,12 @@ test("parses DEXTools pair explorer links", () => {
     "dextools.io/app/arbitrum/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737/",
   )
   assert.equal(bare.chain.id, "arbitrum")
+
+  const v4 = parseDextoolsUrl(
+    "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
+  )
+  assert.equal(v4.chain.id, "ether")
+  assert.equal(v4.address, "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96")
 })
 
 test("rejects links that are not a pair explorer", () => {
@@ -100,6 +120,35 @@ test("decodes the FWOG sell from the screenshot", () => {
 test("decodes a v3 buy of token0", () => {
   const data = `0x${encodeInt(-2_000000000000000000n)}${encodeInt(1_500000000000000000n)}${"0".repeat(64 * 3)}`
   const swap = decodeV3(data, pool)
+  assert.ok(swap)
+  assert.equal(swap.type, "BUY")
+  assert.equal(swap.baseRaw, 2_000000000000000000n)
+  assert.equal(swap.quoteRaw, 1_500000000000000000n)
+})
+
+test("decodes a uniswap v4 swap with the same amount layout as v3", () => {
+  const poolId = "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96"
+  const v4Pool: PoolContext = {
+    ...pool,
+    address: poolId,
+    logAddress: "0x000000000004444c5dc75cb358380d2e3de08a90",
+    topic1: poolId,
+    style: "v4",
+    dex: "Uniswap V4 (Ethereum)",
+    dexId: "uniswap-v4-ethereum",
+  }
+  assert.deepEqual(topicOrder(v4Pool.dexId, v4Pool.dex, v4Pool.style), [SWAP_V4_TOPIC])
+  assert.deepEqual(liquidityTopics(SWAP_V4_TOPIC), [])
+  const data = `0x${encodeInt(-2_000000000000000000n)}${encodeInt(1_500000000000000000n)}${"0".repeat(64 * 4)}`
+  const log = {
+    data,
+    topics: [SWAP_V4_TOPIC, poolId, "0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af"],
+    blockNumber: 1,
+    timestamp: 1,
+    txHash: "0xabc",
+    logIndex: 1,
+  }
+  const swap = decodeSwap(log, v4Pool)
   assert.ok(swap)
   assert.equal(swap.type, "BUY")
   assert.equal(swap.baseRaw, 2_000000000000000000n)

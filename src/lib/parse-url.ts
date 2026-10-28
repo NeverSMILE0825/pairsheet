@@ -3,8 +3,9 @@ import { getChain, type ChainConfig } from "./chains"
 export const EXAMPLE_URL =
   "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737"
 
+// V2/V3 pairs use a 20-byte contract address; Uniswap V4 uses a 32-byte pool id.
 const PAIR_URL =
-  /^https?:\/\/(?:www\.)?dextools\.io\/app\/(?:[a-z]{2}\/)?([a-z0-9]+)\/pair-explorer\/(0x[a-fA-F0-9]{40})\/?(?:[?#].*)?$/i
+  /^https?:\/\/(?:www\.)?dextools\.io\/app\/(?:[a-z]{2}\/)?([a-z0-9]+)\/pair-explorer\/(0x[a-fA-F0-9]{40}|0x[a-fA-F0-9]{64})\/?(?:[?#].*)?$/i
 
 export type ParsedPairUrl = {
   chain: ChainConfig
