@@ -6,7 +6,7 @@ Example:
 
 `https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737`
 
-The app reads `Swap`, `Mint` (liquidity added) and `Burn` (liquidity removed) events from the pool contract (Uniswap v2 and v3 style), resolves the wallet that sent each transaction, and prices the quote token with historical data from DefiLlama. Amounts in the file are the on-chain values. USD figures follow the quote token’s price at the time of the swap, so they can differ slightly from the number shown on DEXTools.
+The app reads `Swap`, `Mint` (liquidity added) and `Burn` (liquidity removed) events from the pool contract (Uniswap v2 and v3 style), resolves the wallet that sent each transaction, and prices the quote token with historical data from DefiLlama. Amounts in the file are the on-chain values. USD figures follow the quote tokenâ€™s price at the time of the swap, so they can differ slightly from the number shown on DEXTools.
 
 ## CSV columns
 
@@ -14,7 +14,7 @@ The app reads `Swap`, `Mint` (liquidity added) and `Burn` (liquidity removed) ev
 
 `tx_no` is the chronological index of that trade among the loaded history (oldest = 1). It stays with the row when you sort or filter the table, and the same value is written to the CSV.
 
-`funded_by` is the public name of the address that first sent native currency to the maker, the same “Funded by” field Etherscan shows. A known label such as Disperse.app is used when one exists. Otherwise the column shows the contract name, ENS name, or a shortened address. The table has the same Funded by column, and the dropdown above it filters the tape and the CSV to one funder.
+`funded_by` is the public name of the address that first sent native currency to the maker, the same â€œFunded byâ€ field Etherscan shows. A known label such as Disperse.app is used when one exists. Otherwise the column shows the contract name, ENS name, or a shortened address. The table has the same Funded by column, and the dropdown above it filters the tape and the CSV to one funder.
 
 Swaps load first, then the page looks up funders in small batches, so a slow or rate-limited explorer never fails the whole load. Wallets the explorer could not answer are retried a few times, and Download CSV unlocks when the lookup finishes.
 
@@ -35,6 +35,8 @@ npm run dev -- --port 41731
 
 Open [http://127.0.0.1:41731](http://127.0.0.1:41731).
 
+Live site (GitHub Pages): [https://neversmile0825.github.io/pairsheet/](https://neversmile0825.github.io/pairsheet/).
+
 ```bash
 npm test
 npm run lint
@@ -52,13 +54,13 @@ Exports stop at 50,000 transactions and say so when a pool is larger. Explorer A
 
 **Solana:** DEXTools Solana pair links are supported. Swaps are reconstructed from pool token-balance changes on each pool transaction (works across PumpSwap, Raydium, and similar AMMs). Funded-by / bot-tag lookups are EVM-only for now. Public Solana RPCs are rate-limited, so very busy pools load in pages and may take longer.
 
-**Uniswap V4:** DEXTools V4 links use a 32-byte pool id (not a pair contract). Pair Sheet reads `Swap` events from the Uniswap V4 PoolManager filtered by that pool id. Liquidity add/remove and per-swap pool-size columns are not available for V4 yet (swaps, makers, funding, and CSV export are). Native ETH quote sides are priced via the chain’s wrapped native token.
+**Uniswap V4:** DEXTools V4 links use a 32-byte pool id (not a pair contract). Pair Sheet reads `Swap` events from the Uniswap V4 PoolManager filtered by that pool id. Liquidity add/remove and per-swap pool-size columns are not available for V4 yet (swaps, makers, funding, and CSV export are). Native ETH quote sides are priced via the chainâ€™s wrapped native token.
 
 ## How a link is read
 
 `https://www.dextools.io/app/{chain}/pair-explorer/{pool}`
 
-A locale segment is fine: `/app/en/ether/pair-explorer/0x…`.
+A locale segment is fine: `/app/en/ether/pair-explorer/0xâ€¦`.
 
 ## Calculate Income
 
