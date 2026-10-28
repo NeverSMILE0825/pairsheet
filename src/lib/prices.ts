@@ -31,6 +31,10 @@ const STABLES = new Set([
   "usdm",
 ])
 
+/** In-memory chart cache so multi-page Solana/EVM loads reuse DefiLlama spans. */
+const chartCache = new Map<string, { points: PricePoint[]; expires: number }>()
+const CHART_TTL_MS = 10 * 60 * 1000
+
 export function isStableSymbol(symbol: string): boolean {
   const normalized = symbol.toLowerCase().replace(/\s+/g, "")
   return STABLES.has(normalized) || STABLES.has(normalized.replace(".", ""))
@@ -76,21 +80,39 @@ async function loadChart(
   const coin = `${llamaChain}:${/^0x/i.test(tokenAddress) ? tokenAddress.toLowerCase() : tokenAddress}`
 
   if (hours <= 168) {
-    return fetchChart(coin, min - 3600, hours, "1h")
+    return fetchChartCached(coin, min - 3600, hours, "1h")
   }
 
   const days = Math.ceil((max - min) / 86400) + 2
   if (days <= 400) {
-    return fetchChart(coin, min - 86400, days, "1d")
+    return fetchChartCached(coin, min - 86400, days, "1d")
   }
 
   const points: PricePoint[] = []
   const window = 400 * 86400
   for (let start = min - 86400; start <= max; start += window) {
     const span = Math.min(400, Math.ceil((max - start) / 86400) + 2)
-    const chunk = await fetchChart(coin, start, span, "1d")
+    const chunk = await fetchChartCached(coin, start, span, "1d")
     points.push(...chunk)
   }
+  return points
+}
+
+async function fetchChartCached(
+  coin: string,
+  start: number,
+  span: number,
+  period: "1h" | "1d",
+): Promise<PricePoint[]> {
+  const safeSpan = Math.max(2, Math.min(span, 500))
+  const bucket = period === "1h" ? 3600 : 86400
+  const roundedStart = Math.floor(start / bucket) * bucket
+  const key = `${coin}|${period}|${roundedStart}|${safeSpan}`
+  const cached = chartCache.get(key)
+  if (cached && cached.expires > Date.now()) return cached.points
+
+  const points = await fetchChart(coin, roundedStart, safeSpan, period)
+  chartCache.set(key, { points, expires: Date.now() + CHART_TTL_MS })
   return points
 }
 

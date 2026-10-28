@@ -1,13 +1,21 @@
 import { encodeBase64Url } from "./bytes"
 import type { ChainConfig } from "./chains"
 import { formatUnits, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
-import { AppError, fetchJson, mapPool } from "./http"
+import { AppError, fetchJson, mapPool, sleep } from "./http"
 import { quotePricesAt } from "./prices"
 import type { PoolContext, ServerCursor, SwapsResponse, Trade } from "./types"
 
 const WSOL = "So11111111111111111111111111111111111111112"
-const SIG_PAGE = 80
-const TX_CONCURRENCY = 4
+/** Max signatures per getSignaturesForAddress call. */
+const SIG_PAGE = 1000
+/** Parallel getTransaction calls. Dual PublicNode hosts keep browsers past per-host limits. */
+const TX_CONCURRENCY = 40
+const TX_RETRY_CONCURRENCY = 10
+const TX_OPTIONS = {
+  encoding: "json" as const,
+  maxSupportedTransactionVersion: 0,
+  commitment: "confirmed" as const,
+}
 
 type TokenBalance = {
   accountIndex: number
@@ -38,6 +46,10 @@ type SigInfo = {
   blockTime: number | null
 }
 
+/** Soft target: keep walking signature pages until we have enough swaps (many pool txs are not swaps). */
+const TARGET_TRADES = 400
+const MAX_SIG_PAGES = 4
+
 export async function getSolanaSwapPage(
   chain: ChainConfig,
   address: string,
@@ -45,29 +57,59 @@ export async function getSolanaSwapPage(
   cursor: ServerCursor | null,
 ): Promise<SwapsResponse> {
   const pool = cursor?.pool ?? (await resolveSolanaPool(chain, address, dextoolsUrl))
-  const before = cursor?.before ?? null
-  const signatures = await getSignatures(chain.rpcs, pool.address, before, SIG_PAGE)
-  const success = signatures.filter((row) => row.err == null)
-  const txs = await mapPool(success, TX_CONCURRENCY, async (row) => {
-    try {
-      const tx = await getTransaction(chain.rpcs, row.signature)
-      return tx ? { signature: row.signature, tx } : null
-    } catch {
-      return null
-    }
-  })
-
+  let before = cursor?.before ?? null
   const trades: Trade[] = []
-  for (const item of txs) {
-    if (!item) continue
-    const trade = decodeSolanaSwap(pool, item.signature, item.tx)
-    if (trade) trades.push(trade)
+  let pages = 0
+  let nextBefore: string | null = null
+  let pageIndex = cursor?.page ?? 0
+
+  while (pages < MAX_SIG_PAGES && trades.length < TARGET_TRADES) {
+    const signatures = await getSignatures(chain.rpcs, pool.address, before, SIG_PAGE)
+    pages += 1
+    pageIndex += 1
+    if (signatures.length === 0) {
+      nextBefore = null
+      break
+    }
+
+    const success = signatures.filter((row) => row.err == null)
+    const timestamps = success
+      .map((row) => row.blockTime)
+      .filter((value): value is number => typeof value === "number" && value > 0)
+
+    // Overlap DefiLlama with getTransaction — pricing uses the same timestamps, no accuracy loss.
+    const pricesPromise =
+      timestamps.length > 0
+        ? quotePricesAt(
+            chain.llama,
+            pool.quote.address === WSOL || pool.quote.symbol === "SOL" ? WSOL : pool.quote.address,
+            pool.quote.symbol,
+            timestamps,
+            chain.wrappedNative,
+          )
+        : Promise.resolve(new Map<number, number | null>())
+
+    const txs = await getTransactions(
+      chain.rpcs,
+      success.map((row) => row.signature),
+    )
+    const priceByTime = await pricesPromise
+
+    for (let index = 0; index < success.length; index += 1) {
+      const item = txs[index]
+      if (!item) continue
+      const trade = decodeSolanaSwap(pool, success[index].signature, item)
+      if (!trade) continue
+      trades.push(applyQuotePrice(trade, pool, priceByTime))
+    }
+
+    nextBefore = signatures.length >= SIG_PAGE ? signatures[signatures.length - 1]?.signature ?? null : null
+    before = nextBefore
+    if (!nextBefore) break
   }
 
   trades.sort((a, b) => b.blockNumber - a.blockNumber || b.logIndex - a.logIndex)
 
-  const priced = await priceSolanaTrades(chain, pool, trades)
-  const nextBefore = signatures.length >= SIG_PAGE ? signatures[signatures.length - 1]?.signature ?? null : null
   const nextCursor = nextBefore
     ? encodeBase64Url(
         JSON.stringify({
@@ -75,7 +117,7 @@ export async function getSolanaSwapPage(
           topic: "",
           triedTopics: [],
           queue: [],
-          page: (cursor?.page ?? 0) + 1,
+          page: pageIndex,
           before: nextBefore,
           blockscoutParams: null,
           pool,
@@ -83,7 +125,7 @@ export async function getSolanaSwapPage(
       )
     : null
 
-  const missingUsd = priced.length > 0 && priced.every((trade) => !trade.totalUsd)
+  const missingUsd = trades.length > 0 && trades.every((trade) => !trade.totalUsd)
   return {
     pool: {
       chainId: pool.chainId,
@@ -101,7 +143,7 @@ export async function getSolanaSwapPage(
       explorerTx: pool.explorerTx,
       explorerAddress: pool.explorerAddress,
     },
-    trades: priced,
+    trades,
     nextCursor,
     warning: missingUsd
       ? "Historical USD prices were unavailable, so price and total are blank. Token amounts are still exact."
@@ -187,11 +229,61 @@ async function getSignatures(
   })
 }
 
-async function getTransaction(rpcs: string[], signature: string): Promise<SolanaTx | null> {
-  const result = await solanaRpc(rpcs, "getTransaction", [
-    signature,
-    { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" },
-  ])
+/**
+ * Fetch transactions at high concurrency across RPC hosts.
+ * Soft-failed rows get a slower second pass so rate limits do not drop real swaps.
+ */
+async function getTransactions(rpcs: string[], signatures: string[]): Promise<(SolanaTx | null)[]> {
+  if (signatures.length === 0) return []
+  const hosts = primaryRpcs(rpcs)
+  let cursor = 0
+  const results = await mapPool(signatures, TX_CONCURRENCY, async (signature) => {
+    const start = cursor
+    cursor += 1
+    return getTransactionRotate(hosts, signature, start)
+  })
+
+  const missing = results
+    .map((tx, index) => (tx ? -1 : index))
+    .filter((index) => index >= 0)
+  if (missing.length === 0) return results
+
+  await sleep(200)
+  const recovered = await mapPool(missing, TX_RETRY_CONCURRENCY, async (index) => {
+    const tx = await getTransactionRotate(hosts, signatures[index], index + 1)
+    return { index, tx }
+  })
+  for (const row of recovered) {
+    if (row.tx) results[row.index] = row.tx
+  }
+  return results
+}
+
+function primaryRpcs(rpcs: string[]): string[] {
+  const preferred = rpcs.filter((rpc) => !/mainnet-beta\.solana\.com/i.test(rpc))
+  return preferred.length > 0 ? preferred : rpcs
+}
+
+async function getTransactionRotate(
+  rpcs: string[],
+  signature: string,
+  start: number,
+): Promise<SolanaTx | null> {
+  if (rpcs.length === 0) return null
+  const offset = ((start % rpcs.length) + rpcs.length) % rpcs.length
+  for (let attempt = 0; attempt < rpcs.length; attempt += 1) {
+    const rpc = rpcs[(offset + attempt) % rpcs.length]
+    try {
+      return await getTransactionOne(rpc, signature)
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+async function getTransactionOne(rpc: string, signature: string): Promise<SolanaTx | null> {
+  const result = await solanaRpcOnce(rpc, "getTransaction", [signature, TX_OPTIONS])
   if (!result || typeof result !== "object") return null
   return result as SolanaTx
 }
@@ -201,35 +293,35 @@ async function solanaRpc(rpcs: string[], method: string, params: unknown[]): Pro
   for (const rpc of rpcs) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const response = await fetch(rpc, {
-          method: "POST",
-          headers: { accept: "application/json", "content-type": "application/json", "user-agent": "PairSheet/1.0" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-          signal: AbortSignal.timeout(20000),
-          cache: "no-store",
-        })
-        if (response.status === 429 || response.status >= 500) {
-          last = new Error(`Solana RPC ${response.status}`)
-          await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
-          continue
-        }
-        if (!response.ok) {
-          last = new Error(`Solana RPC ${response.status}`)
-          break
-        }
-        const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
-        if (body.error?.message) {
-          last = new Error(body.error.message)
-          break
-        }
-        return body.result
+        return await solanaRpcOnce(rpc, method, params)
       } catch (error) {
         last = error instanceof Error ? error : new Error("Solana RPC failed")
-        await new Promise((resolve) => setTimeout(resolve, 250))
+        await sleep(150 * (attempt + 1))
       }
     }
   }
   throw new AppError(last?.message || "Solana RPC failed", 502)
+}
+
+async function solanaRpcOnce(rpc: string, method: string, params: unknown[]): Promise<unknown> {
+  const response = await fetch(rpc, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json", "user-agent": "PairSheet/1.0" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(18000),
+    cache: "no-store",
+  })
+  if (response.status === 429 || response.status >= 500) {
+    throw new Error(`Solana RPC ${response.status}`)
+  }
+  if (!response.ok) {
+    throw new Error(`Solana RPC ${response.status}`)
+  }
+  const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
+  if (body.error?.message) {
+    throw new Error(body.error.message)
+  }
+  return body.result
 }
 
 export function decodeSolanaSwap(pool: PoolContext, signature: string, tx: SolanaTx): Trade | null {
@@ -310,28 +402,38 @@ function poolOwnerAmount(balances: TokenBalance[] | undefined, pool: string, min
   return total
 }
 
-async function priceSolanaTrades(chain: ChainConfig, pool: PoolContext, trades: Trade[]): Promise<Trade[]> {
-  if (trades.length === 0) return trades
-  const timestamps = trades.map((trade) => Math.floor(Date.parse(trade.timestamp) / 1000))
-  const prices = await quotePricesAt(
-    chain.llama,
-    pool.quote.address === WSOL || pool.quote.symbol === "SOL" ? WSOL : pool.quote.address,
-    pool.quote.symbol,
-    timestamps,
-    chain.wrappedNative,
-  )
-  return trades.map((trade, index) => {
-    const quotePrice = prices.get(timestamps[index]) ?? null
-    if (quotePrice === null) return trade
-    const quoteRaw = parseUnits(trade.quoteAmount, pool.quote.decimals)
-    if (quoteRaw === null) return trade
-    const usd = totalUsd(quoteRaw, pool.quote.decimals, quotePrice)
-    return {
-      ...trade,
-      totalUsd: usd,
-      priceUsd: usd ? priceUsdFromTotal(usd, trade.baseAmount) : null,
+function applyQuotePrice(
+  trade: Trade,
+  pool: PoolContext,
+  prices: Map<number, number | null>,
+): Trade {
+  const timestamp = Math.floor(Date.parse(trade.timestamp) / 1000)
+  const quotePrice = prices.get(timestamp) ?? nearestCachedPrice(prices, timestamp)
+  if (quotePrice === null || quotePrice === undefined) return trade
+  const quoteRaw = parseUnits(trade.quoteAmount, pool.quote.decimals)
+  if (quoteRaw === null) return trade
+  const usd = totalUsd(quoteRaw, pool.quote.decimals, quotePrice)
+  return {
+    ...trade,
+    totalUsd: usd,
+    priceUsd: usd ? priceUsdFromTotal(usd, trade.baseAmount) : null,
+  }
+}
+
+/** Signature blockTime and tx.blockTime match; if a key is missing, use nearest same-second chart hit. */
+function nearestCachedPrice(prices: Map<number, number | null>, timestamp: number): number | null {
+  if (prices.has(timestamp)) return prices.get(timestamp) ?? null
+  let best: number | null = null
+  let bestDistance = Infinity
+  for (const [time, price] of prices) {
+    if (price === null) continue
+    const distance = Math.abs(time - timestamp)
+    if (distance < bestDistance && distance <= 120) {
+      best = price
+      bestDistance = distance
     }
-  })
+  }
+  return best
 }
 
 function parseUnits(value: string, decimals: number): bigint | null {

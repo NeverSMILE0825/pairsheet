@@ -22,7 +22,9 @@ export const CHAINS: ChainConfig[] = [
     gecko: "solana",
     llama: "solana",
     rpcs: [
+      // Two PublicNode hostnames: browsers cap concurrent HTTP/1 connections per host.
       "https://solana-rpc.publicnode.com",
+      "https://solana.publicnode.com",
       "https://api.mainnet-beta.solana.com",
     ],
     blockscout: null,

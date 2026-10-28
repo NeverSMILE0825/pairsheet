@@ -402,12 +402,12 @@ async function resolveMakers(chain: ChainConfig, hashes: string[]): Promise<Map<
 }
 
 async function fillFromRpc(rpcs: string[], hashes: string[], makers: Map<string, TxParties>) {
-  const size = 25
+  const size = 40
   const batches: string[][] = []
   for (let index = 0; index < hashes.length; index += size) {
     batches.push(hashes.slice(index, index + size))
   }
-  await mapPool(batches, 3, async (batch) => {
+  await mapPool(batches, 6, async (batch) => {
     for (const rpc of rpcs) {
       try {
         const results = await rpcBatch(
