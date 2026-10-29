@@ -2179,8 +2179,9 @@ export function Exporter() {
         <IntervalChartDialog
           open={chartOpen}
           onClose={() => setChartOpen(false)}
-          rows={minuteRows}
-          intervalMs={intervalMs}
+          trades={minuteSource}
+          zone={zone}
+          initialIntervalMs={intervalMs}
           quoteSymbol={pool.quoteSymbol}
         />
       ) : null}
