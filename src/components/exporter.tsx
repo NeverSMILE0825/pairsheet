@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Users, X } from "lucide-react"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
+import { TradeSizeIcon } from "@/components/trade-size-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,6 +29,7 @@ import {
   sumDecimals,
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
+import { latestQuoteUsdPrice, quoteAmountToUsd } from "@/lib/trade-size"
 import { buildMinuteTape, formatMinuteLabel, formatSpeed } from "@/lib/minute-tape"
 import {
   analysisId,
@@ -428,6 +430,7 @@ export function Exporter() {
   )
   const makerSummaries = useMemo(() => summarizeMakers(trades), [trades])
   const quotePrice = useMemo(() => latestQuotePrice(trades), [trades])
+  const quoteUsdPrice = useMemo(() => latestQuoteUsdPrice(trades), [trades])
 
   const tapeBounds = useMemo(() => {
     if (trades.length === 0) return null
@@ -1380,7 +1383,14 @@ export function Exporter() {
                           {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={row.endQuoteReserve ?? undefined}>
-                          {row.endQuoteReserve ? formatPoolSize(row.endQuoteReserve) : "—"}
+                          {row.endQuoteReserve ? (
+                            <span className="inline-flex items-center justify-end gap-1.5">
+                              {formatPoolSize(row.endQuoteReserve)}
+                              <TradeSizeIcon usd={quoteAmountToUsd(row.endQuoteReserve, quoteUsdPrice)} />
+                            </span>
+                          ) : (
+                            "—"
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">
                           {row.startMarketCapUsd ? formatUsd(row.startMarketCapUsd) : "—"}
@@ -1514,7 +1524,12 @@ export function Exporter() {
                         <td className="px-3 py-2 text-right font-mono text-xs" title={trade.marketCapUsd ?? "Market cap unavailable"}>
                           {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{formatUsd(trade.totalUsd)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">
+                          <span className="inline-flex items-center justify-end gap-1.5">
+                            {formatUsd(trade.totalUsd)}
+                            <TradeSizeIcon usd={trade.totalUsd} />
+                          </span>
+                        </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceQuote ? formatTiny(Number(trade.priceQuote)) : "—"}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={formatGroupedAmount(trade.baseAmount)}>
                           {formatIntegerAmount(trade.baseAmount)}
