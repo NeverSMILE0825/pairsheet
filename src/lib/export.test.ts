@@ -20,6 +20,7 @@ import {
   formatPoolSize,
   formatTiny,
   priceInQuote,
+  marketCapFromPrice,
   priceUsdFromTotal,
   sumDecimals,
   totalUsd,
@@ -67,6 +68,7 @@ const pool: PoolContext = {
   createdAt: null,
   priceUsd: null,
   reserveUsd: null,
+  baseTotalSupply: null,
   dextoolsUrl: EXAMPLE_URL,
   explorerTx: "https://etherscan.io/tx",
   explorerAddress: "https://etherscan.io/address",
@@ -124,6 +126,8 @@ test("decodes the FWOG sell from the screenshot", () => {
   const unit = priceUsdFromTotal(usd, "100000000000000")
   assert.ok(unit)
   assert.equal(unit.startsWith("0.000000000126"), true)
+  assert.equal(marketCapFromPrice("0.000002", "1000000000"), "2000")
+  assert.equal(marketCapFromPrice(null, "1000000000"), null)
   assert.equal(SWAP_V2_TOPIC.startsWith("0xd78ad95f"), true)
 })
 
@@ -288,6 +292,7 @@ test("writes an excel-friendly csv", () => {
     createdAt: null,
     priceUsd: null,
     reserveUsd: null,
+    baseTotalSupply: null,
     dextoolsUrl: EXAMPLE_URL,
     explorerTx: pool.explorerTx,
     explorerAddress: pool.explorerAddress,
@@ -300,6 +305,7 @@ test("writes an excel-friendly csv", () => {
     logIndex: 206,
     type: "SELL",
     priceUsd: "0.00000000012633",
+    marketCapUsd: "12633.15",
     totalUsd: "12633.15",
     priceQuote: "0.000000000000044589",
     baseAmount: "100000000000000",
@@ -317,7 +323,7 @@ test("writes an excel-friendly csv", () => {
   }
   const csv = tradesToCsv(view, [trade], "Asia/Seoul")
   assert.equal(csv.startsWith("\uFEFF"), true)
-  assert.match(csv, /tx_no,date_utc,date_local,timezone,type,price_usd,total_usd/)
+  assert.match(csv, /tx_no,date_utc,date_local,timezone,type,price_usd,market_cap_usd,total_usd/)
   assert.match(csv, /17,2024-08-04T15:54:23\.000Z,2024-08-05 00:54:23,Asia\/Seoul,SELL/)
   assert.match(csv, /quote_amount,pool_base_after,pool_quote_after,holders,maker/)
   assert.match(csv, /4\.45892281616295148,1234\.5,0\.0000099,1284,0x591f/)
@@ -491,6 +497,7 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   const base = {
     timestamp: "2024-08-04T15:54:23.000Z",
     priceUsd: null,
+    marketCapUsd: null,
     totalUsd: null,
     priceQuote: null,
     baseAmount: "1",
@@ -541,6 +548,7 @@ test("numbers transactions oldest-first and keeps them when reordered", () => {
     timestamp: "2024-08-04T15:54:23.000Z",
     type: "BUY" as const,
     priceUsd: null,
+    marketCapUsd: null,
     totalUsd: null,
     priceQuote: null,
     baseAmount: "1",

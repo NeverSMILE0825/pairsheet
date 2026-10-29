@@ -18,6 +18,7 @@ function trade(partial: Partial<Trade> & Pick<Trade, "type" | "maker">): Trade {
     blockNumber: 1,
     logIndex: 0,
     priceUsd: null,
+    marketCapUsd: null,
     totalUsd: null,
     priceQuote: null,
     baseAmount: "0",

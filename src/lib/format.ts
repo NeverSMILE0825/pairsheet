@@ -65,6 +65,17 @@ export function priceUsdFromTotal(total: string, baseAmount: string): string | n
   return price.toFixed(18).replace(/0+$/, "").replace(/\.$/, "")
 }
 
+/** Fully diluted market cap = unit price × total supply (normalized whole tokens). */
+export function marketCapFromPrice(priceUsd: string | null, totalSupply: string | null): string | null {
+  if (!priceUsd || !totalSupply) return null
+  const price = Number(priceUsd)
+  const supply = Number(totalSupply)
+  if (!Number.isFinite(price) || !Number.isFinite(supply) || supply <= 0) return null
+  const cap = price * supply
+  if (!Number.isFinite(cap)) return null
+  return cap.toFixed(8).replace(/0+$/, "").replace(/\.$/, "")
+}
+
 // Whole tokens for the base-token column. Half amounts round away from zero.
 export function formatIntegerAmount(amount: string): string {
   const trimmed = amount.trim()

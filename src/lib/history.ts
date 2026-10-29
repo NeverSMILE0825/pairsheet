@@ -1,7 +1,7 @@
 import { decodeBase64Url, encodeBase64Url } from "./bytes"
 import { chainCanExport, type ChainConfig } from "./chains"
 import { amountsFromV4Receipt, decodeSwap, liquidityTopics, topicOrder } from "./decode"
-import { formatUnits, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
+import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
 import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
 import { resolvePool } from "./pool"
@@ -120,6 +120,7 @@ function toView(pool: PoolContext): PoolView {
     createdAt: pool.createdAt,
     priceUsd: pool.priceUsd,
     reserveUsd: pool.reserveUsd,
+    baseTotalSupply: pool.baseTotalSupply,
     dextoolsUrl: pool.dextoolsUrl,
     explorerTx: pool.explorerTx,
     explorerAddress: pool.explorerAddress,
@@ -374,6 +375,7 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       quotePrice === null || filled.type === "INIT"
         ? null
         : totalUsd(filled.quoteRaw, pool.quote.decimals, quotePrice)
+    const priceUsd = usd && !oneSided ? priceUsdFromTotal(usd, baseAmount) : null
     const trade: Trade = {
       id: `${log.txHash}-${log.logIndex}`,
       txNo: 0,
@@ -388,7 +390,8 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       quoteReserve: size?.quote ?? null,
       holders: null,
       totalUsd: usd,
-      priceUsd: usd && !oneSided ? priceUsdFromTotal(usd, baseAmount) : null,
+      priceUsd,
+      marketCapUsd: marketCapFromPrice(priceUsd, pool.baseTotalSupply),
       maker: makers.get(log.txHash.toLowerCase())?.from ?? "",
       router: makers.get(log.txHash.toLowerCase())?.to ?? "",
       makerTxCount: 0,

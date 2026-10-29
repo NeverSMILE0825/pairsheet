@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Users, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Save, Trash2, Users, X } from "lucide-react"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { Badge } from "@/components/ui/badge"
@@ -29,6 +29,15 @@ import {
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { buildMinuteTape, formatMinuteLabel, formatSpeed } from "@/lib/minute-tape"
+import {
+  analysisId,
+  deleteSavedAnalysis,
+  formatSavedAt,
+  listSavedAnalyses,
+  loadSavedAnalysis,
+  saveAnalysis,
+  type SavedAnalysisMeta,
+} from "@/lib/saved-analyses"
 import {
   AUTO_ZONE,
   dateToParts,
@@ -72,6 +81,7 @@ type SortKey =
   | "timestamp"
   | "type"
   | "priceUsd"
+  | "marketCapUsd"
   | "totalUsd"
   | "priceQuote"
   | "baseAmount"
@@ -150,6 +160,21 @@ export function Exporter() {
   const [fromNo, setFromNo] = useState("")
   const [toNo, setToNo] = useState("")
   const [noError, setNoError] = useState<string | null>(null)
+  const [savedList, setSavedList] = useState<SavedAnalysisMeta[]>([])
+  const [saveBusy, setSaveBusy] = useState(false)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    void refreshSavedList()
+  }, [])
+
+  async function refreshSavedList() {
+    try {
+      setSavedList(await listSavedAnalyses())
+    } catch {
+      // IndexedDB may be unavailable in private mode; keep the live load path working.
+    }
+  }
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
     const chain = getChain(chainId)
@@ -278,11 +303,7 @@ export function Exporter() {
     }
   }
 
-  async function load(target = url) {
-    const trimmed = target.trim()
-    run.current += 1
-    const token = run.current
-    setPhase("loading")
+  function resetViewState() {
     setError(null)
     setWarning(null)
     setCapped(false)
@@ -304,6 +325,15 @@ export function Exporter() {
     setNoError(null)
     setPage(0)
     setTableView("transactions")
+    setSaveNotice(null)
+  }
+
+  async function load(target = url) {
+    const trimmed = target.trim()
+    run.current += 1
+    const token = run.current
+    setPhase("loading")
+    resetViewState()
     setProgress("Reading transactions from the chain…")
 
     try {
@@ -658,6 +688,63 @@ export function Exporter() {
     window.setTimeout(() => setCopied(false), 1200)
   }
 
+  async function persistAnalysis() {
+    if (!pool || rawTrades.length === 0) return
+    setSaveBusy(true)
+    setSaveNotice(null)
+    try {
+      await saveAnalysis({
+        url: url.trim() || pool.dextoolsUrl,
+        pool,
+        trades: rawTrades,
+        facts,
+        warning,
+        capped,
+      })
+      await refreshSavedList()
+      setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol}. Open it anytime from Saved pairs.`)
+    } catch (saveError) {
+      setSaveNotice(saveError instanceof Error ? saveError.message : "Could not save this analysis.")
+    } finally {
+      setSaveBusy(false)
+    }
+  }
+
+  async function openSaved(id: string) {
+    run.current += 1
+    setPhase("loading")
+    resetViewState()
+    setProgress("Opening saved analysis…")
+    try {
+      const saved = await loadSavedAnalysis(id)
+      if (!saved) throw new Error("That saved analysis is no longer available.")
+      setUrl(saved.url)
+      setPool(saved.pool)
+      setTrades(saved.trades)
+      setFacts(saved.facts)
+      setWarning(saved.warning)
+      setCapped(saved.capped)
+      setPhase("done")
+      setProgress("")
+      setSaveNotice(`Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`)
+    } catch (openError) {
+      setPhase("error")
+      setError(openError instanceof Error ? openError.message : "Could not open saved analysis.")
+    }
+  }
+
+  async function removeSaved(id: string) {
+    try {
+      await deleteSavedAnalysis(id)
+      await refreshSavedList()
+      if (pool && analysisId(pool) === id) {
+        setSaveNotice("Removed this pair from Saved pairs.")
+      }
+    } catch {
+      setSaveNotice("Could not delete that saved analysis.")
+    }
+  }
+
   return (
     <div className="flex w-full flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8 lg:py-10 2xl:px-12">
       <header className="flex flex-col gap-4">
@@ -703,6 +790,60 @@ export function Exporter() {
           </Button>
         </div>
       </form>
+
+      {savedList.length > 0 ? (
+        <section className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10" aria-label="Saved pairs">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold tracking-tight">Saved pairs</h2>
+            <p className="text-xs text-muted-foreground">Stored in this browser — open instantly without re-reading the chain.</p>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {savedList.map((item) => (
+              <li
+                key={item.id}
+                className="flex flex-col gap-2 rounded-xl bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">
+                    {item.baseSymbol} / {item.quoteSymbol}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={phase === "loading"}
+                    onClick={() => void openSaved(item.id)}
+                  >
+                    Open
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
+                    disabled={phase === "loading"}
+                    onClick={() => void removeSaved(item.id)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {saveNotice ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {saveNotice}
+        </p>
+      ) : null}
 
       {phase === "loading" ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -752,11 +893,35 @@ export function Exporter() {
                 </a>
               </div>
             </div>
-            <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0 || funding !== null}>
-              <Download />
-              Download CSV
-              {filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                type="button"
+                size="lg"
+                variant="outline"
+                className="h-11"
+                onClick={() => void persistAnalysis()}
+                disabled={
+                  rawTrades.length === 0 ||
+                  saveBusy ||
+                  phase === "loading" ||
+                  holdersBusy ||
+                  funding !== null
+                }
+                title={
+                  holdersBusy || funding
+                    ? "Wait until holders and funders finish so the save includes them."
+                    : undefined
+                }
+              >
+                {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
+                {saveBusy ? "Saving…" : "Save analysis"}
+              </Button>
+              <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0 || funding !== null}>
+                <Download />
+                Download CSV
+                {filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -1074,7 +1239,7 @@ export function Exporter() {
           {tableView === "minutes" ? (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse text-sm">
+              <table className="w-full min-w-[1480px] border-collapse text-sm">
                 <caption className="sr-only">
                   Per-minute buy and sell counts for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -1087,12 +1252,20 @@ export function Exporter() {
                     <th className="px-3 py-2 font-medium text-right">Sell Count</th>
                     <th className="px-3 py-2 font-medium text-right">Average Buy Speed</th>
                     <th className="px-3 py-2 font-medium text-right">Average Sell Speed</th>
+                    <th className="px-3 py-2 font-medium text-right">Start Pool {pool.quoteSymbol}</th>
+                    <th className="px-3 py-2 font-medium text-right">End Pool {pool.quoteSymbol}</th>
+                    <th className="px-3 py-2 font-medium text-right">Start M. Cap</th>
+                    <th className="px-3 py-2 font-medium text-right">End M. Cap</th>
+                    <th className="px-3 py-2 font-medium text-right">Start Price</th>
+                    <th className="px-3 py-2 font-medium text-right">End Price</th>
+                    <th className="px-3 py-2 font-medium text-right">Start Holders</th>
+                    <th className="px-3 py-2 font-medium text-right">End Holders</th>
                   </tr>
                 </thead>
                 <tbody>
                   {minutePageRows.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={15} className="px-4 py-16 text-center text-muted-foreground">
                         No minutes to show yet.
                       </td>
                     </tr>
@@ -1112,6 +1285,30 @@ export function Exporter() {
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>
+                          {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs" title={row.endQuoteReserve ?? undefined}>
+                          {row.endQuoteReserve ? formatPoolSize(row.endQuoteReserve) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">
+                          {row.startMarketCapUsd ? formatUsd(row.startMarketCapUsd) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">
+                          {row.endMarketCapUsd ? formatUsd(row.endMarketCapUsd) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">
+                          {row.startPriceUsd ? `$${formatTiny(Number(row.startPriceUsd))}` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs">
+                          {row.endPriceUsd ? `$${formatTiny(Number(row.endPriceUsd))}` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
+                          {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
+                          {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1122,7 +1319,7 @@ export function Exporter() {
           ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1620px] border-collapse text-sm">
+              <table className="w-full min-w-[1720px] border-collapse text-sm">
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -1153,6 +1350,7 @@ export function Exporter() {
                     <SortHeader label={`Date (${zoneName})`} column="timestamp" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
                     <SortHeader label="Type" column="type" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
                     <SortHeader label="Price (USD)" column="priceUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
+                    <SortHeader label="M. Cap" column="marketCapUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label="Total" column="totalUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={`Price (${pool.quoteSymbol})`} column="priceQuote" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={pool.baseSymbol} column="baseAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
@@ -1184,7 +1382,7 @@ export function Exporter() {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={15} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={16} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : trades.length === 0
@@ -1222,6 +1420,9 @@ export function Exporter() {
                           </span>
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceUsd ? `$${formatTiny(Number(trade.priceUsd))}` : "—"}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs" title={trade.marketCapUsd ?? "Market cap unavailable"}>
+                          {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
+                        </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{formatUsd(trade.totalUsd)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceQuote ? formatTiny(Number(trade.priceQuote)) : "—"}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={formatGroupedAmount(trade.baseAmount)}>

@@ -36,6 +36,7 @@ type GeckoPool = {
   createdAt: string | null
   priceUsd: string | null
   reserveUsd: string | null
+  baseTotalSupply: string | null
 }
 
 export function isPoolId(address: string): boolean {
@@ -108,6 +109,7 @@ export async function resolvePool(
     createdAt: gecko?.createdAt ?? null,
     priceUsd: gecko?.priceUsd ?? null,
     reserveUsd: gecko?.reserveUsd ?? null,
+    baseTotalSupply: gecko?.baseTotalSupply ?? null,
     dextoolsUrl,
     explorerTx: `${chain.explorer}/tx`,
     explorerAddress: `${chain.explorer}/address`,
@@ -152,6 +154,7 @@ function resolveV4Pool(
     createdAt: gecko.createdAt,
     priceUsd: gecko.priceUsd,
     reserveUsd: gecko.reserveUsd,
+    baseTotalSupply: gecko.baseTotalSupply,
     dextoolsUrl,
     explorerTx: `${chain.explorer}/tx`,
     explorerAddress: `${chain.explorer}/address`,
@@ -251,8 +254,12 @@ async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool
     const dex = included.find((item) => item.type === "dex" && (!dexRel || item.id === dexRel))
     if (!base?.attributes || !quote?.attributes) return null
     const attributes = body.data?.attributes ?? {}
+    const baseToken = tokenFromGecko(base.attributes)
+    const supplyFromPool = supplyFromFdv(attributes)
+    const baseTotalSupply =
+      supplyFromPool ?? (await loadTokenSupply(chain, baseToken.address).catch(() => null))
     return {
-      base: tokenFromGecko(base.attributes),
+      base: baseToken,
       quote: tokenFromGecko(quote.attributes),
       dex: String(dex?.attributes?.name || dex?.id || "DEX"),
       dexId: String(dex?.id || ""),
@@ -260,10 +267,35 @@ async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool
       priceUsd:
         attributes.base_token_price_usd != null ? String(attributes.base_token_price_usd) : null,
       reserveUsd: attributes.reserve_in_usd != null ? String(attributes.reserve_in_usd) : null,
+      baseTotalSupply,
     }
   } catch {
     return null
   }
+}
+
+/** Prefer FDV ÷ price from the pool payload (no extra round-trip). */
+export function supplyFromFdv(attributes: Record<string, unknown>): string | null {
+  const price = Number(attributes.base_token_price_usd)
+  const fdv = Number(attributes.fdv_usd)
+  if (!(price > 0) || !Number.isFinite(fdv) || fdv <= 0) return null
+  const supply = fdv / price
+  if (!Number.isFinite(supply) || supply <= 0) return null
+  return String(supply)
+}
+
+async function loadTokenSupply(chain: ChainConfig, tokenAddress: string): Promise<string | null> {
+  if (!tokenAddress || isNativeToken(tokenAddress)) return null
+  const url = `https://api.geckoterminal.com/api/v2/networks/${chain.gecko}/tokens/${tokenAddress}`
+  const body = (await fetchJson(url, { headers: { accept: "application/json;version=20230302" } })) as {
+    data?: { attributes?: Record<string, unknown> }
+  }
+  const attributes = body.data?.attributes ?? {}
+  if (attributes.normalized_total_supply != null) {
+    const value = Number(attributes.normalized_total_supply)
+    if (Number.isFinite(value) && value > 0) return String(value)
+  }
+  return null
 }
 
 function tokenFromGecko(attributes: Record<string, unknown>): TokenInfo {

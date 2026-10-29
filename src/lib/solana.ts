@@ -1,6 +1,7 @@
 import { encodeBase64Url } from "./bytes"
 import type { ChainConfig } from "./chains"
-import { formatUnits, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
+import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
+import { supplyFromFdv } from "./pool"
 import { AppError, fetchJson, mapPool, sleep } from "./http"
 import { quotePricesAt } from "./prices"
 import type { PoolContext, ServerCursor, SwapsResponse, Trade } from "./types"
@@ -139,6 +140,7 @@ export async function getSolanaSwapPage(
       createdAt: pool.createdAt,
       priceUsd: pool.priceUsd,
       reserveUsd: pool.reserveUsd,
+      baseTotalSupply: pool.baseTotalSupply,
       dextoolsUrl: pool.dextoolsUrl,
       explorerTx: pool.explorerTx,
       explorerAddress: pool.explorerAddress,
@@ -186,6 +188,7 @@ async function resolveSolanaPool(chain: ChainConfig, address: string, dextoolsUr
     createdAt: typeof attributes.pool_created_at === "string" ? attributes.pool_created_at : null,
     priceUsd: attributes.base_token_price_usd != null ? String(attributes.base_token_price_usd) : null,
     reserveUsd: attributes.reserve_in_usd != null ? String(attributes.reserve_in_usd) : null,
+    baseTotalSupply: supplyFromFdv(attributes),
     dextoolsUrl,
     explorerTx: `${chain.explorer}/tx`,
     explorerAddress: `${chain.explorer}/account`,
@@ -355,6 +358,7 @@ export function decodeSolanaSwap(pool: PoolContext, signature: string, tx: Solan
     logIndex: 0,
     type,
     priceUsd: null,
+    marketCapUsd: null,
     totalUsd: null,
     priceQuote,
     baseAmount,
@@ -414,10 +418,12 @@ function applyQuotePrice(
   const quoteRaw = parseUnits(trade.quoteAmount, pool.quote.decimals)
   if (quoteRaw === null) return trade
   const usd = totalUsd(quoteRaw, pool.quote.decimals, quotePrice)
+  const priceUsd = usd ? priceUsdFromTotal(usd, trade.baseAmount) : null
   return {
     ...trade,
     totalUsd: usd,
-    priceUsd: usd ? priceUsdFromTotal(usd, trade.baseAmount) : null,
+    priceUsd,
+    marketCapUsd: marketCapFromPrice(priceUsd, pool.baseTotalSupply),
   }
 }
 

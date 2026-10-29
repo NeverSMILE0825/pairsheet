@@ -29,6 +29,8 @@ export type PoolContext = {
   createdAt: string | null
   priceUsd: string | null
   reserveUsd: string | null
+  /** Normalized whole-token base supply (for FDV / market cap). */
+  baseTotalSupply: string | null
   dextoolsUrl: string
   explorerTx: string
   explorerAddress: string
@@ -46,6 +48,7 @@ export type PoolView = {
   createdAt: string | null
   priceUsd: string | null
   reserveUsd: string | null
+  baseTotalSupply: string | null
   dextoolsUrl: string
   explorerTx: string
   explorerAddress: string
@@ -60,6 +63,8 @@ export type Trade = {
   logIndex: number
   type: Side
   priceUsd: string | null
+  /** Fully diluted market cap at this trade's unit price (priceUsd × supply). */
+  marketCapUsd: string | null
   totalUsd: string | null
   priceQuote: string | null
   baseAmount: string
