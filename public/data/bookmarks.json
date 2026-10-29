@@ -1,7 +1,20 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-29T16:41:53.600Z",
+  "updatedAt": "2026-10-29T16:43:38.647Z",
   "bookmarks": [
+    {
+      "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
+      "savedAt": "2026-10-29T16:43:38.009Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
+      "dex": "Uniswap V4 (Ethereum)",
+      "baseSymbol": "GINNAN",
+      "quoteSymbol": "ETH",
+      "tradeCount": 4476,
+      "starred": true
+    },
     {
       "id": "ether:0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
@@ -26,19 +39,6 @@
       "baseSymbol": "ETH",
       "quoteSymbol": "WETH",
       "tradeCount": 650,
-      "starred": true
-    },
-    {
-      "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "savedAt": "2026-10-29T14:03:35.234Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "dex": "Uniswap V4 (Ethereum)",
-      "baseSymbol": "GINNAN",
-      "quoteSymbol": "ETH",
-      "tradeCount": 4476,
       "starred": true
     }
   ]
