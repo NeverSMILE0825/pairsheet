@@ -2,10 +2,16 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   averageSpeedSec,
+  buildIntervalTape,
   buildMinuteTape,
+  estimateBucketCount,
+  floorToIntervalMs,
   floorToMinuteMs,
+  formatBucketLabel,
+  formatIntervalMs,
   formatMinuteLabel,
   formatSpeed,
+  intervalToMs,
 } from "./minute-tape"
 import type { Trade } from "./types"
 
@@ -38,16 +44,27 @@ function trade(partial: Partial<Trade> & Pick<Trade, "type" | "timestamp">): Tra
 test("floors timestamps to the start of the minute", () => {
   assert.equal(floorToMinuteMs("2026-10-26T16:20:59.000Z"), Date.parse("2026-10-26T16:20:00.000Z"))
   assert.equal(floorToMinuteMs("2026-10-26T16:21:00.000Z"), Date.parse("2026-10-26T16:21:00.000Z"))
+  assert.equal(floorToIntervalMs("2026-10-26T16:20:17.000Z", 12_000), Date.parse("2026-10-26T16:20:12.000Z"))
 })
 
-test("average speed is 60 seconds divided by the count", () => {
+test("average speed is interval seconds divided by the count", () => {
   assert.equal(averageSpeedSec(0), null)
   assert.equal(averageSpeedSec(1), 60)
-  assert.equal(averageSpeedSec(20), 3)
-  assert.equal(averageSpeedSec(15), 4)
-  assert.equal(averageSpeedSec(2), 30)
+  assert.equal(averageSpeedSec(7), 60 / 7)
+  assert.equal(averageSpeedSec(9), 60 / 9)
+  assert.equal(averageSpeedSec(2, 12_000), 6)
   assert.equal(formatSpeed(null), "—")
-  assert.equal(formatSpeed(3), "3s")
+  assert.equal(formatSpeed(8.571428, 7), "8.57 (7 count)")
+  assert.equal(formatSpeed(6.666666, 9), "6.67 (9 count)")
+})
+
+test("converts custom interval units to milliseconds", () => {
+  assert.equal(intervalToMs(12, "sec"), 12_000)
+  assert.equal(intervalToMs(5, "min"), 300_000)
+  assert.equal(intervalToMs(1, "hour"), 3_600_000)
+  assert.equal(intervalToMs(1, "d"), 86_400_000)
+  assert.equal(intervalToMs(0, "sec"), null)
+  assert.equal(formatIntervalMs(60_000), "1min")
 })
 
 test("builds inclusive empty minutes from launch through the last trade", () => {
@@ -73,7 +90,31 @@ test("builds inclusive empty minutes from launch through the last trade", () => 
   assert.equal(rows[6].avgBuySpeedSec, 30)
   assert.equal(rows[9].sellCount, 2)
   assert.equal(rows[9].avgSellSpeedSec, 30)
-  assert.equal(formatSpeed(rows[0].avgBuySpeedSec), "—")
+  assert.equal(formatSpeed(rows[0].avgBuySpeedSec, rows[0].buyCount), "—")
+  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount), "30.00 (2 count)")
+})
+
+test("builds 12-second buckets when requested", () => {
+  const rows = buildIntervalTape(
+    [
+      trade({ type: "BUY", timestamp: "2026-10-26T16:20:01.000Z", id: "b1" }),
+      trade({ type: "BUY", timestamp: "2026-10-26T16:20:05.000Z", id: "b2" }),
+      trade({ type: "SELL", timestamp: "2026-10-26T16:20:25.000Z", id: "s1" }),
+    ],
+    "UTC",
+    12_000,
+  )
+  assert.equal(rows.length, 3) // 16:20:00, :12, :24
+  assert.equal(rows[0].buyCount, 2)
+  assert.equal(rows[0].avgBuySpeedSec, 6)
+  assert.equal(formatBucketLabel(rows[0].start, 12_000), "Oct 26 26 16:20:00")
+  assert.equal(estimateBucketCount(
+    [
+      trade({ type: "BUY", timestamp: "2026-10-26T16:20:01.000Z", id: "b1" }),
+      trade({ type: "SELL", timestamp: "2026-10-26T16:20:25.000Z", id: "s1" }),
+    ],
+    12_000,
+  ), 3)
 })
 
 test("carries start/end pool quote, mcap, and price across minutes", () => {

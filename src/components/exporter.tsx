@@ -32,7 +32,20 @@ import {
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trade-size"
-import { buildMinuteTape, formatMinuteLabel, formatSpeed, type MinuteRow } from "@/lib/minute-tape"
+import { IntervalChartDialog } from "@/components/interval-chart"
+import {
+  DEFAULT_INTERVAL_MS,
+  INTERVAL_PRESETS,
+  MAX_INTERVAL_BUCKETS,
+  buildIntervalTape,
+  estimateBucketCount,
+  formatBucketLabel,
+  formatIntervalMs,
+  formatSpeed,
+  intervalToMs,
+  type IntervalUnit,
+  type MinuteRow,
+} from "@/lib/minute-tape"
 import {
   analysisId,
   compareSavedMeta,
@@ -160,6 +173,11 @@ export function Exporter() {
   const [sortDesc, setSortDesc] = useState(true)
   const [minuteSortKey, setMinuteSortKey] = useState<MinuteSortKey>("startMs")
   const [minuteSortDesc, setMinuteSortDesc] = useState(false)
+  const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS)
+  const [intervalPreset, setIntervalPreset] = useState<string>("1m")
+  const [customIntervalValue, setCustomIntervalValue] = useState("1")
+  const [customIntervalUnit, setCustomIntervalUnit] = useState<IntervalUnit>("min")
+  const [chartOpen, setChartOpen] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [tableView, setTableView] = useState<TableView>("transactions")
@@ -540,8 +558,15 @@ export function Exporter() {
     })
   }, [trades, funder, query, period])
 
+  const estimatedBuckets = useMemo(
+    () => estimateBucketCount(minuteSource, intervalMs),
+    [minuteSource, intervalMs],
+  )
+  const intervalTooFine = estimatedBuckets > MAX_INTERVAL_BUCKETS
+
   const minuteRows = useMemo(() => {
-    const rows = buildMinuteTape(minuteSource, zone)
+    if (intervalTooFine) return [] as MinuteRow[]
+    const rows = buildIntervalTape(minuteSource, zone, intervalMs)
     const direction = minuteSortDesc ? -1 : 1
     return [...rows].sort((a, b) => {
       const missingA = isMinuteMissing(a, minuteSortKey)
@@ -549,7 +574,22 @@ export function Exporter() {
       if (missingA !== missingB) return missingA ? 1 : -1
       return compareMinuteRows(a, b, minuteSortKey) * direction || a.startMs - b.startMs
     })
-  }, [minuteSource, zone, minuteSortKey, minuteSortDesc])
+  }, [minuteSource, zone, intervalMs, intervalTooFine, minuteSortKey, minuteSortDesc])
+
+  const intervalLabel = formatIntervalMs(intervalMs)
+
+  function applyIntervalMs(ms: number, presetId: string) {
+    setIntervalMs(ms)
+    setIntervalPreset(presetId)
+    setPage(0)
+  }
+
+  function applyCustomInterval() {
+    const parsed = Number(customIntervalValue)
+    const ms = intervalToMs(parsed, customIntervalUnit)
+    if (ms === null) return
+    applyIntervalMs(ms, "custom")
+  }
 
   const listLength = tableView === "minutes" ? minuteRows.length : filtered.length
   const pageCount = Math.max(1, Math.ceil(listLength / pageSize))
@@ -1104,12 +1144,82 @@ export function Exporter() {
             </div>
             {tableView === "minutes" ? (
               <p className="text-sm text-muted-foreground">
-                Buy/sell counts each minute from launch ({zoneName}). Average speed is 60s ÷ count.
+                Buy/sell counts per {intervalLabel} from launch ({zoneName}). Average speed is interval ÷ count.
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, and funders.</p>
             )}
           </div>
+
+          {tableView === "minutes" ? (
+            <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <span className="text-sm font-medium text-foreground">Interval</span>
+                <div className="flex flex-wrap gap-1 rounded-lg bg-muted p-1" role="group" aria-label="Interval presets">
+                  {INTERVAL_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      aria-pressed={intervalPreset === preset.id && intervalMs === preset.ms}
+                      className={`rounded-md px-2.5 py-1.5 text-sm font-medium ${
+                        intervalPreset === preset.id && intervalMs === preset.ms
+                          ? "bg-background text-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      onClick={() => applyIntervalMs(preset.ms, preset.id)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Custom</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={customIntervalValue}
+                    onChange={(event) => setCustomIntervalValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") applyCustomInterval()
+                    }}
+                    aria-label="Custom interval value"
+                    className="h-9 w-20"
+                  />
+                  <select
+                    aria-label="Custom interval unit"
+                    value={customIntervalUnit}
+                    onChange={(event) => setCustomIntervalUnit(event.target.value as IntervalUnit)}
+                    className="h-9 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="sec">sec</option>
+                    <option value="min">min</option>
+                    <option value="hour">hour</option>
+                    <option value="d">d</option>
+                  </select>
+                  <Button type="button" size="sm" variant="outline" onClick={applyCustomInterval}>
+                    Apply
+                  </Button>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={minuteRows.length === 0}
+                onClick={() => setChartOpen(true)}
+              >
+                Show Chart
+              </Button>
+            </div>
+          ) : null}
+
+          {tableView === "minutes" && intervalTooFine ? (
+            <p className="text-sm text-amber-400">
+              Interval {intervalLabel} would create about {estimatedBuckets.toLocaleString("en-US")} rows
+              (max {MAX_INTERVAL_BUCKETS.toLocaleString("en-US")}). Choose a coarser interval.
+            </p>
+          ) : null}
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             {tableView === "transactions" ? (
@@ -1374,7 +1484,7 @@ export function Exporter() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1480px] border-collapse text-sm">
                 <caption className="sr-only">
-                  Per-minute buy and sell counts for {pool.baseSymbol} / {pool.quoteSymbol}
+                  Per-{intervalLabel} buy and sell counts for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
                 <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
                   <tr>
@@ -1399,7 +1509,7 @@ export function Exporter() {
                   {minutePageRows.length === 0 ? (
                     <tr>
                       <td colSpan={15} className="px-4 py-16 text-center text-muted-foreground">
-                        No minutes to show yet.
+                        {intervalTooFine ? "Interval too fine for this range." : "No interval rows to show yet."}
                       </td>
                     </tr>
                   ) : (
@@ -1408,16 +1518,16 @@ export function Exporter() {
                         <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
                           {row.no.toLocaleString("en-US")}
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatMinuteLabel(row.start)}</td>
-                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatMinuteLabel(row.end)}</td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.start, intervalMs)}</td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.end, intervalMs)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-emerald-400">
                           {row.buyCount.toLocaleString("en-US")}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-rose-400">
                           {row.sellCount.toLocaleString("en-US")}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec, row.buyCount)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec, row.sellCount)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>
                           {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
                         </td>
@@ -1683,7 +1793,7 @@ export function Exporter() {
             <p className="text-muted-foreground" aria-live="polite">
               Showing {firstShown.toLocaleString("en-US")}–{lastShown.toLocaleString("en-US")} of{" "}
               {listLength.toLocaleString("en-US")}
-              {tableView === "minutes" ? " minutes" : ""}
+              {tableView === "minutes" ? ` intervals (${intervalLabel})` : ""}
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-muted-foreground">
@@ -1749,6 +1859,16 @@ export function Exporter() {
           <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the pool’s logs, with the wallet that sent each transaction and the pool size after it." />
           <Step n="3" title="Save the CSV" body="Date, type, USD price, total, both token amounts, pool size, holders, maker, who funded that wallet, and transaction hash." />
         </section>
+      ) : null}
+
+      {pool ? (
+        <IntervalChartDialog
+          open={chartOpen}
+          onClose={() => setChartOpen(false)}
+          rows={minuteRows}
+          intervalMs={intervalMs}
+          quoteSymbol={pool.quoteSymbol}
+        />
       ) : null}
     </div>
   )
