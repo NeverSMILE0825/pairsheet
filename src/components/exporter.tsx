@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Save, Trash2, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Users, X } from "lucide-react"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { Badge } from "@/components/ui/badge"
@@ -31,11 +31,13 @@ import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { buildMinuteTape, formatMinuteLabel, formatSpeed } from "@/lib/minute-tape"
 import {
   analysisId,
+  compareSavedMeta,
   deleteSavedAnalysis,
   formatSavedAt,
   listSavedAnalyses,
   loadSavedAnalysis,
   saveAnalysis,
+  setAnalysisStarred,
   type SavedAnalysisMeta,
 } from "@/lib/saved-analyses"
 import {
@@ -163,10 +165,20 @@ export function Exporter() {
   const [savedList, setSavedList] = useState<SavedAnalysisMeta[]>([])
   const [saveBusy, setSaveBusy] = useState(false)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const [savedOpen, setSavedOpen] = useState(false)
 
   useEffect(() => {
     void refreshSavedList()
   }, [])
+
+  useEffect(() => {
+    if (!savedOpen) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setSavedOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [savedOpen])
 
   async function refreshSavedList() {
     try {
@@ -702,7 +714,7 @@ export function Exporter() {
         capped,
       })
       await refreshSavedList()
-      setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol}. Open it anytime from Saved pairs.`)
+      setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol}. Use Open to reopen it anytime.`)
     } catch (saveError) {
       setSaveNotice(saveError instanceof Error ? saveError.message : "Could not save this analysis.")
     } finally {
@@ -711,6 +723,7 @@ export function Exporter() {
   }
 
   async function openSaved(id: string) {
+    setSavedOpen(false)
     run.current += 1
     setPhase("loading")
     resetViewState()
@@ -738,10 +751,23 @@ export function Exporter() {
       await deleteSavedAnalysis(id)
       await refreshSavedList()
       if (pool && analysisId(pool) === id) {
-        setSaveNotice("Removed this pair from Saved pairs.")
+        setSaveNotice("Removed this pair from saved pairs.")
       }
     } catch {
       setSaveNotice("Could not delete that saved analysis.")
+    }
+  }
+
+  async function toggleStar(item: SavedAnalysisMeta) {
+    const next = !item.starred
+    setSavedList((current) =>
+      [...current.map((row) => (row.id === item.id ? { ...row, starred: next } : row))].sort(compareSavedMeta),
+    )
+    try {
+      await setAnalysisStarred(item.id, next)
+      await refreshSavedList()
+    } catch {
+      await refreshSavedList()
     }
   }
 
@@ -784,6 +810,25 @@ export function Exporter() {
             className="h-11 flex-1 font-mono text-sm"
             aria-invalid={phase === "error"}
           />
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            className="h-11 px-4"
+            disabled={phase === "loading"}
+            onClick={() => {
+              void refreshSavedList()
+              setSavedOpen(true)
+            }}
+          >
+            <FolderOpen />
+            Open
+            {savedList.length > 0 ? (
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+                {savedList.length}
+              </span>
+            ) : null}
+          </Button>
           <Button type="submit" size="lg" className="h-11 px-4" disabled={phase === "loading" || url.trim() === ""}>
             {phase === "loading" ? <Loader2 className="animate-spin" /> : null}
             {phase === "loading" ? "Reading chain" : "Load swaps"}
@@ -791,52 +836,98 @@ export function Exporter() {
         </div>
       </form>
 
-      {savedList.length > 0 ? (
-        <section className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10" aria-label="Saved pairs">
-          <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-semibold tracking-tight">Saved pairs</h2>
-            <p className="text-xs text-muted-foreground">Stored in this browser — open instantly without re-reading the chain.</p>
+      {savedOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSavedOpen(false)
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="saved-pairs-title"
+            className="flex max-h-[min(32rem,85vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-foreground/10"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <h2 id="saved-pairs-title" className="text-base font-semibold tracking-tight">
+                  Saved pairs
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Stored in this browser. Star a pair to keep it at the top.
+                </p>
+              </div>
+              <Button type="button" size="icon" variant="ghost" aria-label="Close saved pairs" onClick={() => setSavedOpen(false)}>
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {savedList.length === 0 ? (
+                <p className="px-2 py-10 text-center text-sm text-muted-foreground">
+                  No saved pairs yet. Load a tape, then use Save analysis.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {savedList.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex flex-col gap-2 rounded-xl bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex min-w-0 items-start gap-2">
+                        <button
+                          type="button"
+                          className={`mt-0.5 shrink-0 rounded-md p-1 ${
+                            item.starred ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground hover:text-foreground"
+                          }`}
+                          aria-label={
+                            item.starred
+                              ? `Unstar ${item.baseSymbol} / ${item.quoteSymbol}`
+                              : `Star ${item.baseSymbol} / ${item.quoteSymbol}`
+                          }
+                          aria-pressed={Boolean(item.starred)}
+                          onClick={() => void toggleStar(item)}
+                        >
+                          <Star className={`size-4 ${item.starred ? "fill-current" : ""}`} />
+                        </button>
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">
+                            {item.baseSymbol} / {item.quoteSymbol}
+                            <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-2 pl-8 sm:pl-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={phase === "loading"}
+                          onClick={() => void openSaved(item.id)}
+                        >
+                          Open
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
+                          disabled={phase === "loading"}
+                          onClick={() => void removeSaved(item.id)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
-          <ul className="flex flex-col gap-2">
-            {savedList.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-col gap-2 rounded-xl bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium">
-                    {item.baseSymbol} / {item.quoteSymbol}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={phase === "loading"}
-                    onClick={() => void openSaved(item.id)}
-                  >
-                    Open
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
-                    disabled={phase === "loading"}
-                    onClick={() => void removeSaved(item.id)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+        </div>
       ) : null}
 
       {saveNotice ? (

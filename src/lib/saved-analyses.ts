@@ -17,6 +17,8 @@ export type SavedAnalysisMeta = {
   baseSymbol: string
   quoteSymbol: string
   tradeCount: number
+  /** Pinned to the top of the Open dialog when true. */
+  starred?: boolean
 }
 
 export type SavedAnalysisPayload = {
@@ -32,6 +34,13 @@ export type SavedAnalysisPayload = {
 
 export function analysisId(pool: Pick<PoolView, "chainId" | "address">): string {
   return `${pool.chainId}:${pool.address.toLowerCase()}`
+}
+
+/** Starred first, then newest saved. */
+export function compareSavedMeta(a: SavedAnalysisMeta, b: SavedAnalysisMeta): number {
+  const star = Number(Boolean(b.starred)) - Number(Boolean(a.starred))
+  if (star !== 0) return star
+  return b.savedAt.localeCompare(a.savedAt)
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -73,7 +82,7 @@ export async function listSavedAnalyses(): Promise<SavedAnalysisMeta[]> {
     const tx = db.transaction(META_STORE, "readonly")
     const rows = await requestToPromise(tx.objectStore(META_STORE).getAll() as IDBRequest<SavedAnalysisMeta[]>)
     await transactionDone(tx)
-    return [...rows].sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+    return [...rows].sort(compareSavedMeta)
   } finally {
     db.close()
   }
@@ -105,35 +114,59 @@ export async function saveAnalysis(input: {
   }
   const id = analysisId(input.pool)
   const savedAt = new Date().toISOString()
-  const meta: SavedAnalysisMeta = {
-    id,
-    url: input.url,
-    savedAt,
-    chainId: input.pool.chainId,
-    chainName: input.pool.chainName,
-    address: input.pool.address,
-    dex: input.pool.dex,
-    baseSymbol: input.pool.baseSymbol,
-    quoteSymbol: input.pool.quoteSymbol,
-    tradeCount: input.trades.length,
-  }
-  const payload: SavedAnalysisPayload = {
-    id,
-    url: input.url,
-    savedAt,
-    pool: input.pool,
-    trades: input.trades,
-    facts: input.facts,
-    warning: input.warning,
-    capped: input.capped,
-  }
   const db = await openDb()
   try {
-    const tx = db.transaction([META_STORE, PAYLOAD_STORE], "readwrite")
-    tx.objectStore(META_STORE).put(meta)
-    tx.objectStore(PAYLOAD_STORE).put(payload)
-    await transactionDone(tx)
+    const readTx = db.transaction(META_STORE, "readonly")
+    const existing = await requestToPromise(
+      readTx.objectStore(META_STORE).get(id) as IDBRequest<SavedAnalysisMeta | undefined>,
+    )
+    await transactionDone(readTx)
+    const meta: SavedAnalysisMeta = {
+      id,
+      url: input.url,
+      savedAt,
+      chainId: input.pool.chainId,
+      chainName: input.pool.chainName,
+      address: input.pool.address,
+      dex: input.pool.dex,
+      baseSymbol: input.pool.baseSymbol,
+      quoteSymbol: input.pool.quoteSymbol,
+      tradeCount: input.trades.length,
+      starred: Boolean(existing?.starred),
+    }
+    const payload: SavedAnalysisPayload = {
+      id,
+      url: input.url,
+      savedAt,
+      pool: input.pool,
+      trades: input.trades,
+      facts: input.facts,
+      warning: input.warning,
+      capped: input.capped,
+    }
+    const writeTx = db.transaction([META_STORE, PAYLOAD_STORE], "readwrite")
+    writeTx.objectStore(META_STORE).put(meta)
+    writeTx.objectStore(PAYLOAD_STORE).put(payload)
+    await transactionDone(writeTx)
     return meta
+  } finally {
+    db.close()
+  }
+}
+
+export async function setAnalysisStarred(id: string, starred: boolean): Promise<void> {
+  if (typeof indexedDB === "undefined") return
+  const db = await openDb()
+  try {
+    const tx = db.transaction(META_STORE, "readwrite")
+    const store = tx.objectStore(META_STORE)
+    const existing = await requestToPromise(store.get(id) as IDBRequest<SavedAnalysisMeta | undefined>)
+    if (!existing) {
+      await transactionDone(tx)
+      return
+    }
+    store.put({ ...existing, starred })
+    await transactionDone(tx)
   } finally {
     db.close()
   }
