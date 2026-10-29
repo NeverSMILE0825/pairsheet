@@ -55,6 +55,7 @@ import {
   getSyncStatus,
   getSyncToken,
   hasSyncToken,
+  hydrateSyncStorage,
   isSyncSuccessful,
   publishBookmarks,
   readCachedBookmarkMetas,
@@ -238,10 +239,13 @@ export function Exporter() {
   const importFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    setSyncEnabled(hasSyncToken())
-    setSyncTokenDraft(getSyncToken())
-    setSyncStatus(getSyncStatus())
-    void refreshSavedList()
+    void (async () => {
+      await hydrateSyncStorage()
+      setSyncEnabled(hasSyncToken())
+      setSyncTokenDraft(getSyncToken())
+      setSyncStatus(getSyncStatus())
+      await refreshSavedList()
+    })()
   }, [])
 
   useEffect(() => {
@@ -1021,9 +1025,8 @@ export function Exporter() {
         return
       }
       setSyncToken(token)
-      if (!hasSyncToken()) {
-        throw new Error("Could not store the sync token in this browser (storage blocked).")
-      }
+      // Token is kept in memory (+ IndexedDB when localStorage is blocked). Always publish with the
+      // validated token so a storage quirk cannot abort a successful GitHub auth.
       setSyncEnabled(true)
       const local = await localBookmarksForPublish()
       const catalog = await publishMergedBookmarks(local, token)

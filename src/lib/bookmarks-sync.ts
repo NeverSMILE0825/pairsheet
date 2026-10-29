@@ -13,6 +13,14 @@ const RAW_URL = `https://raw.githubusercontent.com/${SYNC_REPO}/main/${SYNC_PATH
 const PAGES_URL = `https://neversmile0825.github.io/pairsheet/data/bookmarks.json`
 const CONTENTS_URL = `https://api.github.com/repos/${SYNC_REPO}/contents/${SYNC_PATH}`
 
+/** Dedicated IDB for sync settings — localStorage is blocked in some browsers that still allow IndexedDB. */
+const SYNC_DB_NAME = "pairsheet-sync"
+const SYNC_DB_VERSION = 1
+const SYNC_STORE = "kv"
+const IDB_TOKEN_KEY = "token"
+const IDB_STATUS_KEY = "status"
+const IDB_META_CACHE_KEY = "bookmarkMetaCache"
+
 export type BookmarkCatalog = {
   version: 1
   updatedAt: string | null
@@ -27,24 +35,167 @@ export type SyncStatus = {
   lastAction: "publish" | "pull" | "validate" | null
 }
 
-export function getSyncToken(): string {
-  if (typeof window === "undefined") return ""
+const emptyStatus = (): SyncStatus => ({
+  enabled: false,
+  lastOkAt: null,
+  lastError: null,
+  lastCount: 0,
+  lastAction: null,
+})
+
+/** Always-available session copy — localStorage may throw "storage blocked". */
+let memoryToken = ""
+let memoryStatus: SyncStatus = emptyStatus()
+let memoryMetaCache: SavedAnalysisMeta[] = []
+let hydratePromise: Promise<void> | null = null
+
+function readLocal(key: string): string | null {
+  if (typeof window === "undefined") return null
   try {
-    return window.localStorage.getItem(SYNC_TOKEN_KEY)?.trim() || ""
+    return window.localStorage.getItem(key)
   } catch {
-    return ""
+    return null
   }
 }
 
-export function setSyncToken(token: string): void {
-  if (typeof window === "undefined") return
+function writeLocal(key: string, value: string | null): boolean {
+  if (typeof window === "undefined") return false
   try {
-    const value = token.trim()
-    if (value) window.localStorage.setItem(SYNC_TOKEN_KEY, value)
-    else window.localStorage.removeItem(SYNC_TOKEN_KEY)
+    if (value === null) window.localStorage.removeItem(key)
+    else window.localStorage.setItem(key, value)
+    return true
   } catch {
-    // Storage blocked.
+    return false
   }
+}
+
+function openSyncDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("IndexedDB unavailable"))
+      return
+    }
+    const request = indexedDB.open(SYNC_DB_NAME, SYNC_DB_VERSION)
+    request.onerror = () => reject(request.error ?? new Error("Could not open sync storage."))
+    request.onsuccess = () => resolve(request.result)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(SYNC_STORE)) {
+        db.createObjectStore(SYNC_STORE)
+      }
+    }
+  })
+}
+
+async function idbGet(key: string): Promise<unknown> {
+  const db = await openSyncDb()
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(SYNC_STORE, "readonly")
+      const req = tx.objectStore(SYNC_STORE).get(key)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error ?? new Error("IndexedDB read failed."))
+    })
+  } finally {
+    db.close()
+  }
+}
+
+async function idbSet(key: string, value: unknown): Promise<void> {
+  const db = await openSyncDb()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(SYNC_STORE, "readwrite")
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed."))
+      tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted."))
+      if (value === null || value === undefined || value === "") tx.objectStore(SYNC_STORE).delete(key)
+      else tx.objectStore(SYNC_STORE).put(value, key)
+    })
+  } finally {
+    db.close()
+  }
+}
+
+function parseStatus(raw: unknown): SyncStatus | null {
+  if (!raw || typeof raw !== "object") return null
+  const parsed = raw as SyncStatus
+  return {
+    enabled: false,
+    lastOkAt: typeof parsed.lastOkAt === "string" ? parsed.lastOkAt : null,
+    lastError: typeof parsed.lastError === "string" ? parsed.lastError : null,
+    lastCount: typeof parsed.lastCount === "number" ? parsed.lastCount : 0,
+    lastAction:
+      parsed.lastAction === "publish" || parsed.lastAction === "pull" || parsed.lastAction === "validate"
+        ? parsed.lastAction
+        : null,
+  }
+}
+
+/** Load token/status from localStorage or IndexedDB into memory (call once on app start). */
+export async function hydrateSyncStorage(): Promise<void> {
+  if (typeof window === "undefined") return
+  if (!hydratePromise) {
+    hydratePromise = (async () => {
+      const localToken = readLocal(SYNC_TOKEN_KEY)?.trim() || ""
+      if (localToken) memoryToken = localToken
+      try {
+        const localStatus = parseStatus(JSON.parse(readLocal(SYNC_STATUS_KEY) || "null"))
+        if (localStatus) memoryStatus = { ...localStatus, enabled: Boolean(memoryToken) }
+      } catch {
+        // ignore corrupt status
+      }
+
+      try {
+        const localMetas = readLocal(BOOKMARK_CACHE_KEY)
+        if (localMetas) {
+          const parsed = JSON.parse(localMetas) as unknown
+          if (Array.isArray(parsed)) {
+            memoryMetaCache = parseCatalog({ version: 1, updatedAt: null, bookmarks: parsed }).bookmarks
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (!memoryToken) {
+          const idbToken = await idbGet(IDB_TOKEN_KEY)
+          if (typeof idbToken === "string" && idbToken.trim()) memoryToken = idbToken.trim()
+        }
+        if (!memoryStatus.lastOkAt && !memoryStatus.lastError) {
+          const idbStatus = parseStatus(await idbGet(IDB_STATUS_KEY))
+          if (idbStatus) memoryStatus = { ...idbStatus, enabled: Boolean(memoryToken) }
+        }
+        if (memoryMetaCache.length === 0) {
+          const idbMetas = await idbGet(IDB_META_CACHE_KEY)
+          if (Array.isArray(idbMetas)) {
+            memoryMetaCache = parseCatalog({ version: 1, updatedAt: null, bookmarks: idbMetas }).bookmarks
+          }
+        }
+      } catch {
+        // IndexedDB blocked too — memory-only for this session.
+      }
+
+      memoryStatus = { ...memoryStatus, enabled: Boolean(memoryToken) }
+    })()
+  }
+  await hydratePromise
+}
+
+export function getSyncToken(): string {
+  if (memoryToken) return memoryToken
+  return readLocal(SYNC_TOKEN_KEY)?.trim() || ""
+}
+
+export function setSyncToken(token: string): void {
+  const value = token.trim()
+  memoryToken = value
+  memoryStatus = { ...memoryStatus, enabled: value.length > 0 }
+  writeLocal(SYNC_TOKEN_KEY, value || null)
+  void idbSet(IDB_TOKEN_KEY, value || null).catch(() => {
+    // Persistence best-effort; memory token still enables publish this session.
+  })
 }
 
 export function hasSyncToken(): boolean {
@@ -52,36 +203,16 @@ export function hasSyncToken(): boolean {
 }
 
 export function getSyncStatus(): SyncStatus {
-  if (typeof window === "undefined") {
-    return { enabled: false, lastOkAt: null, lastError: null, lastCount: 0, lastAction: null }
-  }
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(SYNC_STATUS_KEY) || "null") as SyncStatus | null
-    if (!parsed || typeof parsed !== "object") {
-      return { enabled: hasSyncToken(), lastOkAt: null, lastError: null, lastCount: 0, lastAction: null }
-    }
-    return {
-      enabled: hasSyncToken(),
-      lastOkAt: typeof parsed.lastOkAt === "string" ? parsed.lastOkAt : null,
-      lastError: typeof parsed.lastError === "string" ? parsed.lastError : null,
-      lastCount: typeof parsed.lastCount === "number" ? parsed.lastCount : 0,
-      lastAction:
-        parsed.lastAction === "publish" || parsed.lastAction === "pull" || parsed.lastAction === "validate"
-          ? parsed.lastAction
-          : null,
-    }
-  } catch {
-    return { enabled: hasSyncToken(), lastOkAt: null, lastError: null, lastCount: 0, lastAction: null }
-  }
+  return { ...memoryStatus, enabled: hasSyncToken() }
 }
 
 function writeSyncStatus(patch: Partial<SyncStatus>): SyncStatus {
   const next: SyncStatus = { ...getSyncStatus(), ...patch, enabled: hasSyncToken() }
-  try {
-    window.localStorage.setItem(SYNC_STATUS_KEY, JSON.stringify(next))
-  } catch {
+  memoryStatus = next
+  writeLocal(SYNC_STATUS_KEY, JSON.stringify(next))
+  void idbSet(IDB_STATUS_KEY, next).catch(() => {
     // ignore
-  }
+  })
   return next
 }
 
@@ -139,9 +270,10 @@ function authErrorMessage(status: number, detail: string): string {
 }
 
 export function readCachedBookmarkMetas(): SavedAnalysisMeta[] {
+  if (memoryMetaCache.length > 0) return memoryMetaCache
   if (typeof window === "undefined") return []
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(BOOKMARK_CACHE_KEY) || "null") as unknown
+    const parsed = JSON.parse(readLocal(BOOKMARK_CACHE_KEY) || "null") as unknown
     if (!Array.isArray(parsed)) return []
     return parseCatalog({ version: 1, updatedAt: null, bookmarks: parsed }).bookmarks
   } catch {
@@ -150,13 +282,12 @@ export function readCachedBookmarkMetas(): SavedAnalysisMeta[] {
 }
 
 export function cacheBookmarkMetas(metas: SavedAnalysisMeta[]): void {
-  if (typeof window === "undefined") return
-  try {
-    const merged = mergeSavedMeta(metas, readCachedBookmarkMetas())
-    window.localStorage.setItem(BOOKMARK_CACHE_KEY, JSON.stringify(merged))
-  } catch {
-    // Storage blocked.
-  }
+  const merged = mergeSavedMeta(metas, readCachedBookmarkMetas())
+  memoryMetaCache = merged
+  writeLocal(BOOKMARK_CACHE_KEY, JSON.stringify(merged))
+  void idbSet(IDB_META_CACHE_KEY, merged).catch(() => {
+    // ignore
+  })
 }
 
 async function fetchCatalogFromUrl(url: string): Promise<BookmarkCatalog | null> {
@@ -335,11 +466,11 @@ export async function publishBookmarks(
 
 export function clearSync(): void {
   setSyncToken("")
-  try {
-    window.localStorage.removeItem(SYNC_STATUS_KEY)
-  } catch {
+  memoryStatus = emptyStatus()
+  writeLocal(SYNC_STATUS_KEY, null)
+  void idbSet(IDB_STATUS_KEY, null).catch(() => {
     // ignore
-  }
+  })
 }
 
 export function syncTokenHelpUrl(): string {
