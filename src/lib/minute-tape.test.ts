@@ -57,10 +57,10 @@ test("average speed is interval seconds divided by the count", () => {
   assert.equal(averageSpeedSec(9), 60 / 9)
   assert.equal(averageSpeedSec(2, 12_000), 6)
   assert.equal(formatSpeed(null), "—")
-  assert.equal(formatSpeed(30, 2), "30s (2 count)")
-  assert.equal(formatSpeed(7.5, 8), "7.5s (8 count)")
-  assert.equal(formatSpeed(8.571428, 7), "8.57s (7 count)")
-  assert.equal(formatSpeed(6.666666, 9), "6.67s (9 count)")
+  assert.equal(formatSpeed(30, 2), "30s")
+  assert.equal(formatSpeed(7.5, 8), "7.5s")
+  assert.equal(formatSpeed(8.571428, 7), "8.57s")
+  assert.equal(formatSpeed(6.666666, 9), "6.67s")
 })
 
 test("converts custom interval units to milliseconds", () => {
@@ -96,7 +96,7 @@ test("builds inclusive empty minutes from launch through the last trade", () => 
   assert.equal(rows[9].sellCount, 2)
   assert.equal(rows[9].avgSellSpeedSec, 30)
   assert.equal(formatSpeed(rows[0].avgBuySpeedSec, rows[0].buyCount), "—")
-  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount), "30s (2 count)")
+  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount), "30s")
 })
 
 test("builds 12-second buckets when requested", () => {

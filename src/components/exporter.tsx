@@ -61,6 +61,7 @@ import {
   formatBucketLabel,
   formatIntervalMs,
   formatSpeed,
+  formatSpeedTitle,
   intervalToMs,
   type IntervalUnit,
   type MinuteRow,
@@ -2143,10 +2144,20 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showDa("avgBuySpeedSec") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec, row.buyCount)}</td>
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={formatSpeedTitle(row.avgBuySpeedSec, row.buyCount, "buy")}
+                          >
+                            {formatSpeed(row.avgBuySpeedSec, row.buyCount)}
+                          </td>
                         ) : null}
                         {showDa("avgSellSpeedSec") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec, row.sellCount)}</td>
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={formatSpeedTitle(row.avgSellSpeedSec, row.sellCount, "sell")}
+                          >
+                            {formatSpeed(row.avgSellSpeedSec, row.sellCount)}
+                          </td>
                         ) : null}
                         {showDa("startQuoteReserve") ? (
                           <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>

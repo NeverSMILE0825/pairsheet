@@ -70,7 +70,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Deep Analysis & chart",
     summary: "Group the tape into time buckets (12s → 1 day) for counts, pool, holders, and gas.",
     bullets: [
-      "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket (e.g. 60s, 7.5s).",
+      "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket (shown as 60s or 7.5s; hover for the event count).",
       "Start / End pool quote, mcap, price, and holders show how the bucket opened and closed.",
       "Gas Price / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
       "Chart Y-axis includes Gas Price and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",

@@ -102,10 +102,17 @@ export function formatSpeedSeconds(seconds: number): string {
   return `${fixed}s`
 }
 
-/** "8.57s (7 count)" — average seconds between events and how many events in the bucket. */
+/** "60s" / "7.5s" — average seconds between events in the bucket. */
 export function formatSpeed(seconds: number | null, count = 0): string {
   if (seconds === null || count <= 0) return "—"
-  return `${formatSpeedSeconds(seconds)} (${count} count)`
+  return formatSpeedSeconds(seconds)
+}
+
+/** Hover detail: "60s average · 1 buy/sell in bucket". */
+export function formatSpeedTitle(seconds: number | null, count = 0, side: "buy" | "sell" = "buy"): string | undefined {
+  if (seconds === null || count <= 0) return undefined
+  const unit = side === "buy" ? "buy" : "sell"
+  return `${formatSpeedSeconds(seconds)} average · ${count.toLocaleString("en-US")} ${unit}${count === 1 ? "" : "s"} in bucket`
 }
 
 /** Bucket start/end label; keeps seconds when the interval is sub-minute. */
