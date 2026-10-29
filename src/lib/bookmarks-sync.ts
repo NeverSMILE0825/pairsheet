@@ -232,9 +232,17 @@ async function putCatalog(token: string, catalog: BookmarkCatalog, sha: string):
   })
 }
 
+/** True when the last publish succeeded and is still the known state. */
+export function isSyncSuccessful(status: SyncStatus = getSyncStatus()): boolean {
+  return Boolean(status.enabled && status.lastOkAt && !status.lastError && status.lastAction === "publish")
+}
+
 /** Publish the merged bookmark list to the repo (requires a fine-grained PAT with Contents: Write). */
-export async function publishBookmarks(bookmarks: SavedAnalysisMeta[]): Promise<BookmarkCatalog> {
-  const token = getSyncToken()
+export async function publishBookmarks(
+  bookmarks: SavedAnalysisMeta[],
+  tokenOverride?: string,
+): Promise<BookmarkCatalog> {
+  const token = (tokenOverride ?? getSyncToken()).trim()
   if (!token) throw new Error("Add a GitHub sync token first.")
 
   const catalog: BookmarkCatalog = {
@@ -254,7 +262,7 @@ export async function publishBookmarks(bookmarks: SavedAnalysisMeta[]): Promise<
     if (!response.ok) {
       const detail = await readGithubError(response)
       const message = authErrorMessage(response.status, detail)
-      writeSyncStatus({ lastError: message, lastAction: "publish" })
+      writeSyncStatus({ lastError: message, lastAction: "publish", lastOkAt: null })
       throw new Error(message)
     }
     writeSyncStatus({
@@ -262,12 +270,13 @@ export async function publishBookmarks(bookmarks: SavedAnalysisMeta[]): Promise<
       lastError: null,
       lastCount: catalog.bookmarks.length,
       lastAction: "publish",
+      enabled: true,
     })
     return catalog
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("GitHub")) throw error
+    if (error instanceof Error && (error.message.startsWith("GitHub") || error.message.includes("PAT"))) throw error
     const message = error instanceof Error ? error.message : "Publish failed."
-    writeSyncStatus({ lastError: message, lastAction: "publish" })
+    writeSyncStatus({ lastError: message, lastAction: "publish", lastOkAt: null })
     throw error instanceof Error ? error : new Error(message)
   }
 }

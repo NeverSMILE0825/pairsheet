@@ -54,6 +54,7 @@ import {
   getSyncStatus,
   getSyncToken,
   hasSyncToken,
+  isSyncSuccessful,
   publishBookmarks,
   setSyncToken,
   syncTokenHelpUrl,
@@ -261,15 +262,31 @@ export function Exporter() {
     }
   }
 
-  async function publishMergedBookmarks(nextLocal?: SavedAnalysisMeta[]) {
-    if (!hasSyncToken()) return
-    const local = nextLocal ?? (await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[]))
+  async function localBookmarksForPublish(): Promise<SavedAnalysisMeta[]> {
+    const fromDb = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
+    if (fromDb.length > 0) return fromDb
+    // Fallback: metas already shown as local in the Open dialog.
+    return savedList.filter((item) => localSavedIds.has(item.id))
+  }
+
+  async function publishMergedBookmarks(nextLocal?: SavedAnalysisMeta[], tokenOverride?: string) {
+    const token = (tokenOverride ?? getSyncToken()).trim()
+    if (!token) throw new Error("Add a GitHub sync token first.")
+    const local = nextLocal ?? (await localBookmarksForPublish())
+    if (local.length === 0) {
+      throw new Error("No local saved pairs to publish. Save a pair on this browser first, then Publish now.")
+    }
     const remote = await fetchRemoteBookmarks()
     const merged = mergeSavedMeta(local, remote.bookmarks)
-    await publishBookmarks(merged)
+    if (merged.length === 0) {
+      throw new Error("Nothing to publish after merging with the shared list.")
+    }
+    const catalog = await publishBookmarks(merged, token)
+    setLocalSavedIds(new Set(local.map((item) => item.id)))
     setSavedList(merged)
     setSyncStatus(getSyncStatus())
     setSyncEnabled(true)
+    return catalog
   }
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
@@ -841,10 +858,14 @@ export function Exporter() {
       const local = await listSavedAnalyses()
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       if (hasSyncToken()) {
-        await publishMergedBookmarks(local)
-        setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced to every browser.`)
+        const catalog = await publishMergedBookmarks(local)
+        setSyncStatus(getSyncStatus())
+        setSaveNotice(
+          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced ${catalog.bookmarks.length} pair(s) to every browser.`,
+        )
       } else {
         await refreshSavedList()
+        setSyncStatus(getSyncStatus())
         setSaveNotice(
           `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open → Enable sync (or Export) to use it on Edge / other PCs.`,
         )
@@ -976,7 +997,7 @@ export function Exporter() {
       clearSync()
       setSyncEnabled(false)
       setSyncStatus(getSyncStatus())
-      setSyncMessage("Cloud sync turned off. Saved pairs stay on this browser only.")
+      setSyncMessage("Not synced · this browser only.")
       return
     }
     setSyncBusy(true)
@@ -989,19 +1010,26 @@ export function Exporter() {
         return
       }
       setSyncToken(token)
+      if (!hasSyncToken()) {
+        throw new Error("Could not store the sync token in this browser (storage blocked).")
+      }
       setSyncEnabled(true)
-      await publishMergedBookmarks()
+      const local = await localBookmarksForPublish()
+      const catalog = await publishMergedBookmarks(local, token)
       setShowSyncSetup(false)
+      const status = getSyncStatus()
+      setSyncStatus(status)
       setSyncMessage(
-        `Synced ${savedList.length || (await listSavedAnalyses()).length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
+        `Synced ${catalog.bookmarks.length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
       )
-      setSaveNotice("Cloud sync is on. Saved pairs are on the shared list.")
+      setSaveNotice(`Cloud sync is on · ${catalog.bookmarks.length} pair(s) on the shared list.`)
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
     } finally {
       setSyncBusy(false)
       setSyncStatus(getSyncStatus())
+      setSyncEnabled(hasSyncToken())
     }
   }
 
@@ -1014,16 +1042,18 @@ export function Exporter() {
     setSyncBusy(true)
     setSyncMessage(null)
     try {
-      await publishMergedBookmarks()
+      const local = await localBookmarksForPublish()
+      const catalog = await publishMergedBookmarks(local)
       const status = getSyncStatus()
       setSyncStatus(status)
-      setSyncMessage(`Published ${status.lastCount} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
-      setSaveNotice(`Published ${status.lastCount} saved pair(s) to the shared list.`)
+      setSyncMessage(`Synced · ${catalog.bookmarks.length} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
+      setSaveNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`)
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
     } finally {
       setSyncBusy(false)
+      setSyncEnabled(hasSyncToken())
     }
   }
 
@@ -1118,36 +1148,36 @@ export function Exporter() {
                   Saved pairs
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {syncEnabled
+                  {isSyncSuccessful(syncStatus)
                     ? "Synced across browsers via GitHub. Star a pair to pin it."
                     : "This browser keeps full snapshots. Enable sync or Export so Edge / other PCs can see them."}
                 </p>
                 <p
-                  className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
-                    syncEnabled && !syncStatus.lastError
-                      ? "bg-emerald-500/15 text-emerald-400"
-                      : syncStatus.lastError
-                        ? "bg-amber-500/15 text-amber-400"
-                        : "bg-muted text-muted-foreground"
+                  className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium ${
+                    syncBusy
+                      ? "bg-muted text-muted-foreground"
+                      : isSyncSuccessful(syncStatus)
+                        ? "bg-emerald-500/15 text-emerald-400"
+                        : "bg-rose-500/15 text-rose-400"
                   }`}
                   role="status"
                 >
                   <span
                     aria-hidden
                     className={`size-1.5 rounded-full ${
-                      syncEnabled && !syncStatus.lastError
-                        ? "bg-emerald-500"
-                        : syncStatus.lastError
-                          ? "bg-amber-500"
-                          : "bg-muted-foreground"
+                      syncBusy
+                        ? "bg-muted-foreground"
+                        : isSyncSuccessful(syncStatus)
+                          ? "bg-emerald-500"
+                          : "bg-rose-500"
                     }`}
                   />
                   {syncBusy
                     ? "Syncing with GitHub…"
-                    : syncEnabled && syncStatus.lastOkAt && !syncStatus.lastError
+                    : isSyncSuccessful(syncStatus)
                       ? `Synced · ${syncStatus.lastCount} pair(s) · ${formatSyncAgo(syncStatus.lastOkAt)}`
                       : syncStatus.lastError
-                        ? "Sync failed — see details below"
+                        ? "Not synced · publish failed"
                         : "Not synced · this browser only"}
                 </p>
               </div>
@@ -1176,7 +1206,13 @@ export function Exporter() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className={syncEnabled && !syncStatus.lastError ? "border-emerald-500/40 text-emerald-400" : undefined}
+                className={
+                  isSyncSuccessful(syncStatus)
+                    ? "border-emerald-500/40 text-emerald-400"
+                    : syncEnabled
+                      ? "border-rose-500/40 text-rose-400"
+                      : undefined
+                }
                 onClick={() => {
                   setShowSyncSetup((value) => !value)
                   setSyncMessage(null)
@@ -1196,12 +1232,11 @@ export function Exporter() {
             {syncMessage || syncStatus.lastError ? (
               <div
                 className={`border-b border-border px-4 py-2 text-xs ${
-                  syncMessage?.toLowerCase().includes("fail") ||
-                  syncMessage?.toLowerCase().includes("denied") ||
-                  syncMessage?.toLowerCase().includes("rejected") ||
-                  syncStatus.lastError
-                    ? "bg-amber-500/10 text-amber-300"
-                    : "bg-emerald-500/10 text-emerald-300"
+                  isSyncSuccessful(syncStatus) &&
+                  syncMessage &&
+                  !/fail|denied|rejected|error|could not|nothing to publish|no local/i.test(syncMessage)
+                    ? "bg-emerald-500/10 text-emerald-400"
+                    : "bg-rose-500/10 text-rose-400"
                 }`}
                 role="status"
               >
