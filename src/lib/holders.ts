@@ -5,6 +5,8 @@ import type { PoolView, Trade } from "./types"
 
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 const ZERO = "0x0000000000000000000000000000000000000000"
+/** Common burn / null sinks — never counted as holders. */
+const DEAD = "0x000000000000000000000000000000000000dead"
 const ROUTESCAN_PAGE = 1000
 const MAX_LOG_PAGE = 10
 const MAX_TRANSFER_LOGS = 120_000
@@ -54,25 +56,35 @@ type SolAccountState = Map<string, { owner: string; amount: bigint }>
  * EVM: every ERC-20 Transfer for the base token, replayed from genesis.
  * Solana: current token accounts + mint-linked txs reversed through the trade window.
  */
+/** Addresses that hold tokens but are not counted as “holders” (pool LP, burns). */
+export function holderExcludeSet(...addresses: Array<string | null | undefined>): Set<string> {
+  const set = new Set<string>([ZERO, DEAD])
+  for (const address of addresses) {
+    if (address) set.add(address.toLowerCase())
+  }
+  return set
+}
+
 export async function resolveHolderCounts(
   chain: ChainConfig,
   pool: PoolView,
   trades: Trade[],
 ): Promise<HolderLookupResult> {
   if (trades.length === 0) return { counts: new Map(), truncated: false }
-  if (chain.id === "solana") return resolveSolanaHolders(chain, pool.baseAddress, trades)
-  return resolveEvmHolders(chain, pool.baseAddress, trades)
+  if (chain.id === "solana") return resolveSolanaHolders(chain, pool.baseAddress, pool.address, trades)
+  return resolveEvmHolders(chain, pool.baseAddress, pool.address, trades)
 }
 
 async function resolveEvmHolders(
   chain: ChainConfig,
   token: string,
+  poolAddress: string,
   trades: Trade[],
 ): Promise<HolderLookupResult> {
   // Routescan/Etherscan getLogs often returns an incomplete set when toBlock is a
   // concrete number; always read through "latest" and slice by each trade's index.
   const { events, truncated } = await loadEvmTransfers(chain, token, null)
-  const timeline = replayEvmTransfers(events)
+  const timeline = replayEvmTransfers(events, holderExcludeSet(poolAddress))
   const counts = new Map<string, number>()
   for (const trade of trades) {
     counts.set(trade.id, holdersAt(timeline, trade.blockNumber, trade.logIndex))
@@ -83,14 +95,15 @@ async function resolveEvmHolders(
 /** Pure ERC-20 balance replay — exported for tests. */
 export function replayEvmTransfers(
   events: TransferEvent[],
+  excluded: Set<string> = holderExcludeSet(),
 ): { blockNumber: number; logIndex: number; holders: number }[] {
   const balances = new Map<string, bigint>()
   let holders = 0
   const timeline: { blockNumber: number; logIndex: number; holders: number }[] = []
 
   for (const event of events) {
-    holders = applyDelta(balances, holders, event.from, -event.amount)
-    holders = applyDelta(balances, holders, event.to, event.amount)
+    holders = applyDelta(balances, holders, event.from, -event.amount, excluded)
+    holders = applyDelta(balances, holders, event.to, event.amount, excluded)
     timeline.push({ blockNumber: event.blockNumber, logIndex: event.logIndex, holders })
   }
   return timeline
@@ -118,19 +131,27 @@ export function holdersAt(
   return best >= 0 ? timeline[best].holders : 0
 }
 
-function applyDelta(balances: Map<string, bigint>, holders: number, address: string, delta: bigint): number {
-  if (!address || sameAddress(address, ZERO) || delta === 0n) return holders
+function applyDelta(
+  balances: Map<string, bigint>,
+  holders: number,
+  address: string,
+  delta: bigint,
+  excluded: Set<string>,
+): number {
+  if (!address || delta === 0n) return holders
   const key = address.toLowerCase()
+  // Still track excluded balances so later transfers stay consistent; never count them.
+  const countsTowardHolders = !excluded.has(key)
   const old = balances.get(key) ?? 0n
   let next = old + delta
   if (next < 0n) next = 0n
   if (old === 0n && next > 0n) {
     balances.set(key, next)
-    return holders + 1
+    return countsTowardHolders ? holders + 1 : holders
   }
   if (old > 0n && next === 0n) {
     balances.delete(key)
-    return holders - 1
+    return countsTowardHolders ? holders - 1 : holders
   }
   if (next === 0n) balances.delete(key)
   else balances.set(key, next)
@@ -259,6 +280,7 @@ function hexNumber(value: unknown): number {
 async function resolveSolanaHolders(
   chain: ChainConfig,
   mint: string,
+  poolAddress: string,
   trades: Trade[],
 ): Promise<HolderLookupResult> {
   const oldestTradeSec = Math.min(
@@ -272,6 +294,7 @@ async function resolveSolanaHolders(
   for (const trade of trades) {
     if (trade.txHash) needed.add(trade.txHash)
   }
+  const excludedOwners = holderExcludeSet(poolAddress)
   const txs = await mapPool([...needed], SOLANA_TX_CONCURRENCY, async (signature) => {
     try {
       const tx = await solanaRpc(chain.rpcs, "getTransaction", [
@@ -290,7 +313,7 @@ async function resolveSolanaHolders(
     .sort((a, b) => (b.tx.slot || 0) - (a.tx.slot || 0))
 
   for (const row of ordered) {
-    bySig.set(row.signature, countSolanaHolders(state))
+    bySig.set(row.signature, countSolanaHolders(state, excludedOwners))
     reverseSolanaTx(state, mint, row.tx)
   }
 
@@ -302,10 +325,10 @@ async function resolveSolanaHolders(
   return { counts, truncated }
 }
 
-function countSolanaHolders(state: SolAccountState): number {
+function countSolanaHolders(state: SolAccountState, excludedOwners: Set<string>): number {
   const owners = new Set<string>()
   for (const row of state.values()) {
-    if (row.amount > 0n && row.owner) owners.add(row.owner)
+    if (row.amount > 0n && row.owner && !excludedOwners.has(row.owner)) owners.add(row.owner)
   }
   return owners.size
 }

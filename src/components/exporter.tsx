@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { HelpDialogButton } from "@/components/help-dialog"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
@@ -1084,22 +1085,20 @@ export function Exporter() {
 
   return (
     <div className="flex w-full flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8 lg:py-10 2xl:px-12">
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_0_0_6px_oklch(0.82_0.12_190/0.12)]">
-              <LedgerMark />
-            </span>
-            <div>
-              <p className="text-xs font-medium tracking-[0.18em] text-primary uppercase">On-chain tape</p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_0_0_6px_oklch(0.82_0.12_190/0.12)]">
+            <LedgerMark />
+          </span>
+          <div>
+            <p className="text-xs font-medium tracking-[0.18em] text-primary uppercase">On-chain tape</p>
+            <div className="flex items-center gap-1.5">
               <h1 className="font-heading text-3xl font-semibold tracking-tight">Pair Sheet</h1>
+              <HelpDialogButton />
             </div>
           </div>
-          <LiveMarketWidgets />
         </div>
-        <p className="max-w-3xl text-base text-muted-foreground sm:text-lg">
-          Paste a DEXTools pair link. Pair Sheet reads every buy, sell, liquidity add and remove from the pool contract, shows the pool size and the funding wallet behind each transaction, and exports the full history as CSV.
-        </p>
+        <LiveMarketWidgets />
       </header>
 
       <form
@@ -2242,7 +2241,7 @@ export function Exporter() {
           <p className="text-xs leading-5 text-muted-foreground">
             Amounts come from the pool’s on-chain Swap, Mint (ADD) and Burn (REMOVE) events; for ADD and REMOVE the two amounts are the tokens deposited or withdrawn and Total is the quote-token side in USD. USD totals multiply the quote token by its historical price from DefiLlama. The {pool.baseSymbol} column is a whole number of tokens; hover a cell for the exact amount. The CSV keeps the full on-chain value.
             The CSV includes every row that matches the filters, not only the current page
-            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers. Gas Fee is that transaction’s effective gas price in gwei; Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
+            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers (the pool contract and burn addresses are excluded). Gas Fee is that transaction’s effective gas price in gwei; Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
           </p>
         </section>
       ) : phase === "idle" || phase === "error" ? (

@@ -1,0 +1,14 @@
+---
+description: Keep in-app Help in sync with every user-facing feature change
+alwaysApply: true
+---
+
+# Update Help with every feature change
+
+Whenever you add, remove, or change a user-facing feature in Pair Sheet:
+
+1. Update `src/lib/help-content.ts` in the same change (sections, bullets, examples).
+2. Set `HELP_UPDATED_AT` to today’s date (`YYYY-MM-DD`).
+3. Cover the new behavior with a clear example when it would otherwise be ambiguous (gas totals, sync, holders, intervals, etc.).
+
+Do not ship UI/lib feature work without a matching Help update.

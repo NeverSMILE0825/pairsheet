@@ -39,7 +39,7 @@ import {
 } from "./timezone"
 import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
-import { holdersAt, replayEvmTransfers } from "./holders"
+import { holderExcludeSet, holdersAt, replayEvmTransfers } from "./holders"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -457,6 +457,33 @@ test("replays ERC-20 transfers into exact holder counts per log", () => {
   assert.equal(holdersAt(timeline, 2, 1), 2)
   assert.equal(holdersAt(timeline, 2, 5), 2)
   assert.equal(holdersAt(timeline, 2, 0), 1)
+})
+
+test("holder replay excludes the pool and burn sinks", () => {
+  const pool = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const timeline = replayEvmTransfers(
+    [
+      { blockNumber: 1, logIndex: 1, from: "0x0000000000000000000000000000000000000000", to: pool, amount: 1000n },
+      {
+        blockNumber: 2,
+        logIndex: 1,
+        from: pool,
+        to: "0x1111111111111111111111111111111111111111",
+        amount: 100n,
+      },
+      {
+        blockNumber: 3,
+        logIndex: 1,
+        from: "0x1111111111111111111111111111111111111111",
+        to: "0x000000000000000000000000000000000000dead",
+        amount: 100n,
+      },
+    ],
+    holderExcludeSet(pool),
+  )
+  assert.equal(holdersAt(timeline, 1, 1), 0)
+  assert.equal(holdersAt(timeline, 2, 1), 1)
+  assert.equal(holdersAt(timeline, 3, 1), 0)
 })
 
 test("detects the Solana wallet that funded a maker with SOL", () => {
