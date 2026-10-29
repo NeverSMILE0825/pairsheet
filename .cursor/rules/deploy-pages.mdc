@@ -1,0 +1,16 @@
+---
+description: After every code update, commit, push to GitHub, and publish GitHub Pages
+alwaysApply: true
+---
+
+# Deploy every update to GitHub Pages
+
+When finishing any user-requested code change that should appear on the live site:
+
+1. Commit the relevant files (only when the work is ready; use a clear why-focused message).
+2. Push to `origin` `main` — that triggers `.github/workflows/pages.yml`.
+3. Confirm the Pages workflow started (`gh run list --workflow=pages.yml --limit 1`) and report the live URL: https://neversmile0825.github.io/pairsheet/
+
+Do not skip the push after substantive UI/lib changes unless the user explicitly asks not to deploy.
+
+Author commits with one-off `-c user.name` / `-c user.email` matching recent repo history; never update git config.
