@@ -28,6 +28,7 @@ import {
   sumDecimals,
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
+import { buildMinuteTape, formatMinuteLabel, formatSpeed } from "@/lib/minute-tape"
 import {
   AUTO_ZONE,
   dateToParts,
@@ -43,6 +44,8 @@ import {
   type DateTimeParts,
 } from "@/lib/timezone"
 import type { PoolView, SwapsResponse, Trade } from "@/lib/types"
+
+type TableView = "transactions" | "minutes"
 
 type PeriodFilter = { startMs: number; endMs: number }
 
@@ -124,6 +127,7 @@ export function Exporter() {
   const [sortDesc, setSortDesc] = useState(true)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
+  const [tableView, setTableView] = useState<TableView>("transactions")
   const [zoneChoice, setZoneChoice] = useState<string>(() => {
     if (typeof window === "undefined") return AUTO_ZONE
     try {
@@ -299,6 +303,7 @@ export function Exporter() {
     setToNo("")
     setNoError(null)
     setPage(0)
+    setTableView("transactions")
     setProgress("Reading transactions from the chain…")
 
     try {
@@ -449,14 +454,41 @@ export function Exporter() {
     })
   }, [trades, filter, funder, query, sortKey, sortDesc, selected, period])
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  /** Minute tape ignores type filter so Buy/Sell columns both stay meaningful. */
+  const minuteSource = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return trades.filter((trade) => {
+      if (funder === "__none__" && trade.fundedByAddress) return false
+      if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
+      if (period) {
+        const time = Date.parse(trade.timestamp)
+        if (!Number.isFinite(time) || time < period.startMs || time > period.endMs) return false
+      }
+      if (!needle) return true
+      return (
+        trade.maker.includes(needle) ||
+        trade.txHash.includes(needle) ||
+        (trade.fundedBy ?? "").toLowerCase().includes(needle) ||
+        (trade.fundedByAddress ?? "").includes(needle)
+      )
+    })
+  }, [trades, funder, query, period])
+
+  const minuteRows = useMemo(() => buildMinuteTape(minuteSource, zone), [minuteSource, zone])
+
+  const listLength = tableView === "minutes" ? minuteRows.length : filtered.length
+  const pageCount = Math.max(1, Math.ceil(listLength / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
   const pageRows = useMemo(
     () => filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize),
     [filtered, currentPage, pageSize],
   )
-  const firstShown = filtered.length === 0 ? 0 : currentPage * pageSize + 1
-  const lastShown = Math.min(filtered.length, (currentPage + 1) * pageSize)
+  const minutePageRows = useMemo(
+    () => minuteRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize),
+    [minuteRows, currentPage, pageSize],
+  )
+  const firstShown = listLength === 0 ? 0 : currentPage * pageSize + 1
+  const lastShown = Math.min(listLength, (currentPage + 1) * pageSize)
 
   const funders = useMemo(() => {
     const counts = new Map<string, { label: string; count: number }>()
@@ -744,6 +776,28 @@ export function Exporter() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="flex gap-1 rounded-lg bg-muted p-1">
+              {(
+                [
+                  ["transactions", "Transactions"],
+                  ["minutes", "Per minute"],
+                ] as const
+              ).map(([view, label]) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={tableView === view}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${tableView === view ? "bg-background text-foreground" : "text-muted-foreground"}`}
+                  onClick={() => {
+                    setTableView(view)
+                    setPage(0)
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {tableView === "transactions" ? (
+            <div className="flex gap-1 rounded-lg bg-muted p-1">
               {(Object.keys(FILTER_LABELS) as SideFilter[]).map((side) => (
                 <button
                   key={side}
@@ -760,6 +814,11 @@ export function Exporter() {
                 </button>
               ))}
             </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Buy/sell counts each minute from launch ({zoneName}). Average speed is 60s ÷ count.
+              </p>
+            )}
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               Time zone
               <select
@@ -776,39 +835,44 @@ export function Exporter() {
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              Funded by
-              <select
-                aria-label="Filter by funded by"
-                value={funder}
-                onChange={(event) => {
-                  setFunder(event.target.value)
-                  selectionAnchor.current = null
-                  setPage(0)
-                }}
-                className="h-9 max-w-56 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
-              >
-                <option value="">All</option>
-                {funders.map(([address, info]) => (
-                  <option key={address} value={address}>
-                    {info.label} ({info.count})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value)
-                selectionAnchor.current = null
-                setPage(0)
-              }}
-              placeholder="Filter by maker, funder, or tx"
-              className="h-9 sm:max-w-xs"
-              spellCheck={false}
-            />
+            {tableView === "transactions" ? (
+              <>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Funded by
+                  <select
+                    aria-label="Filter by funded by"
+                    value={funder}
+                    onChange={(event) => {
+                      setFunder(event.target.value)
+                      selectionAnchor.current = null
+                      setPage(0)
+                    }}
+                    className="h-9 max-w-56 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="">All</option>
+                    {funders.map(([address, info]) => (
+                      <option key={address} value={address}>
+                        {info.label} ({info.count})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value)
+                    selectionAnchor.current = null
+                    setPage(0)
+                  }}
+                  placeholder="Filter by maker, funder, or tx"
+                  className="h-9 sm:max-w-xs"
+                  spellCheck={false}
+                />
+              </>
+            ) : null}
           </div>
 
+          {tableView === "transactions" ? (
           <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10">
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={selected.size === 0}>
@@ -949,8 +1013,9 @@ export function Exporter() {
               </div>
             ) : null}
           </div>
+          ) : null}
 
-          {income ? (
+          {tableView === "transactions" && income ? (
             <div className="rounded-2xl bg-card p-4 ring-1 ring-primary/40" role="region" aria-label="Income result">
               <p className="text-xs tracking-wide text-muted-foreground uppercase">
                 Sum of {pool.quoteSymbol} in {income.count.toLocaleString("en-US")} selected transaction{income.count === 1 ? "" : "s"}
@@ -990,6 +1055,55 @@ export function Exporter() {
             </div>
           ) : null}
 
+          {tableView === "minutes" ? (
+          <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse text-sm">
+                <caption className="sr-only">
+                  Per-minute buy and sell counts for {pool.baseSymbol} / {pool.quoteSymbol}
+                </caption>
+                <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
+                  <tr>
+                    <th className="px-3 py-2 font-medium text-right">No</th>
+                    <th className="px-3 py-2 font-medium">Start Time ({zoneName})</th>
+                    <th className="px-3 py-2 font-medium">End Time ({zoneName})</th>
+                    <th className="px-3 py-2 font-medium text-right">Buy Count</th>
+                    <th className="px-3 py-2 font-medium text-right">Sell Count</th>
+                    <th className="px-3 py-2 font-medium text-right">Average Buy Speed</th>
+                    <th className="px-3 py-2 font-medium text-right">Average Sell Speed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {minutePageRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                        No minutes to show yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    minutePageRows.map((row) => (
+                      <tr key={row.startMs} className="border-t border-border/80 hover:bg-muted/40">
+                        <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
+                          {row.no.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatMinuteLabel(row.start)}</td>
+                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatMinuteLabel(row.end)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-emerald-400">
+                          {row.buyCount.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-rose-400">
+                          {row.sellCount.toLocaleString("en-US")}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec)}</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1620px] border-collapse text-sm">
@@ -1191,12 +1305,15 @@ export function Exporter() {
               </table>
             </div>
           </div>
+          )}
           <nav
             aria-label="Pagination"
             className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 text-sm ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between"
           >
             <p className="text-muted-foreground" aria-live="polite">
-              Showing {firstShown.toLocaleString("en-US")}–{lastShown.toLocaleString("en-US")} of {filtered.length.toLocaleString("en-US")}
+              Showing {firstShown.toLocaleString("en-US")}–{lastShown.toLocaleString("en-US")} of{" "}
+              {listLength.toLocaleString("en-US")}
+              {tableView === "minutes" ? " minutes" : ""}
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-muted-foreground">
