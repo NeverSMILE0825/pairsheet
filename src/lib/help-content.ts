@@ -77,13 +77,20 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
   {
     id: "filters",
-    title: "Filters, timezone, selection",
-    summary: "Focus the tape without losing tx numbers.",
+    title: "Filters, columns, timezone",
+    summary: "Focus the tape and shrink horizontal scroll.",
     bullets: [
       "Type chips (All / Buys / Sells / Adds / Removes / Init) and Funded by filter the view.",
       "Search matches maker, funder, or tx hash.",
+      "Columns opens a checklist for Transactions or Deep Analysis — hide unused fields to reduce sideways scrolling. Choices are remembered on this browser.",
       "Timezone changes how dates render in the table; CSV always includes UTC and local.",
       "Checkboxes + Shift-click select a range for CSV download of the selection.",
+    ],
+    examples: [
+      {
+        title: "Fewer columns",
+        body: "Open Columns → uncheck Pool base, Pool quote, and Others if you only need price, total, gas, and maker. Click Show all to restore.",
+      },
     ],
   },
   {

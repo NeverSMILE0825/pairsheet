@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
@@ -9,7 +10,22 @@ import { TradeSizeIcon } from "@/components/trade-size-icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { getChain, supportedChainNames } from "@/lib/chains"
+import { getChain } from "@/lib/chains"
+import {
+  DA_COLUMN_DEFS,
+  TX_COLUMN_DEFS,
+  countVisible,
+  defaultDaVisibility,
+  defaultTxVisibility,
+  displayGwei,
+  loadDaVisibility,
+  loadTxVisibility,
+  saveDaVisibility,
+  saveTxVisibility,
+  tableMinWidth,
+  type DaColumnId,
+  type TxColumnId,
+} from "@/lib/table-columns"
 import { resolveFunders } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
 import { getSwapPage } from "@/lib/history"
@@ -158,7 +174,6 @@ type MinuteSortKey =
   | "endGasPriceGwei"
   | "endGasFeeTotalEth"
 
-const CHAINS = supportedChainNames().join(", ")
 const PAGE_ATTEMPTS = 3
 const FUNDER_BATCH = 6
 const FUNDER_PARALLEL = 2
@@ -208,6 +223,12 @@ export function Exporter() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [tableView, setTableView] = useState<TableView>("transactions")
+  const [txColumns, setTxColumns] = useState<Record<TxColumnId, boolean>>(() =>
+    typeof window === "undefined" ? defaultTxVisibility() : loadTxVisibility(),
+  )
+  const [daColumns, setDaColumns] = useState<Record<DaColumnId, boolean>>(() =>
+    typeof window === "undefined" ? defaultDaVisibility() : loadDaVisibility(),
+  )
   const [zoneChoice, setZoneChoice] = useState<string>(() => {
     if (typeof window === "undefined") return AUTO_ZONE
     try {
@@ -670,6 +691,40 @@ export function Exporter() {
   }
 
   const listLength = tableView === "minutes" ? minuteRows.length : filtered.length
+  const txColCount = countVisible(txColumns)
+  const daColCount = countVisible(daColumns)
+  const showTx = (id: TxColumnId) => txColumns[id]
+  const showDa = (id: DaColumnId) => daColumns[id]
+
+  function setTxColumn(id: TxColumnId, visible: boolean) {
+    setTxColumns((current) => {
+      if (!visible && countVisible(current) <= 1) return current
+      const next = { ...current, [id]: visible }
+      saveTxVisibility(next)
+      return next
+    })
+  }
+
+  function setDaColumn(id: DaColumnId, visible: boolean) {
+    setDaColumns((current) => {
+      if (!visible && countVisible(current) <= 1) return current
+      const next = { ...current, [id]: visible }
+      saveDaVisibility(next)
+      return next
+    })
+  }
+
+  function resetTxColumns() {
+    const next = defaultTxVisibility()
+    saveTxVisibility(next)
+    setTxColumns(next)
+  }
+
+  function resetDaColumns() {
+    const next = defaultDaVisibility()
+    saveDaVisibility(next)
+    setDaColumns(next)
+  }
   const pageCount = Math.max(1, Math.ceil(listLength / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
   const pageRows = useMemo(
@@ -1669,6 +1724,37 @@ export function Exporter() {
                 />
               </>
             ) : null}
+            {tableView === "transactions" ? (
+              <ColumnsMenu
+                defs={TX_COLUMN_DEFS}
+                visibility={txColumns}
+                onChange={setTxColumn}
+                onReset={resetTxColumns}
+                resolveLabel={(id, fallback) => {
+                  if (id === "priceQuote") return `Price (${pool?.quoteSymbol ?? "quote"})`
+                  if (id === "baseAmount") return pool?.baseSymbol ?? "Base"
+                  if (id === "quoteAmount") return pool?.quoteSymbol ?? "Quote"
+                  if (id === "baseReserve") return `Pool ${pool?.baseSymbol ?? "base"}`
+                  if (id === "quoteReserve") return `Pool ${pool?.quoteSymbol ?? "quote"}`
+                  if (id === "timestamp") return `Date (${zoneName})`
+                  return fallback
+                }}
+              />
+            ) : (
+              <ColumnsMenu
+                defs={DA_COLUMN_DEFS}
+                visibility={daColumns}
+                onChange={setDaColumn}
+                onReset={resetDaColumns}
+                resolveLabel={(id, fallback) => {
+                  if (id === "startQuoteReserve") return `Start Pool ${pool?.quoteSymbol ?? "quote"}`
+                  if (id === "endQuoteReserve") return `End Pool ${pool?.quoteSymbol ?? "quote"}`
+                  if (id === "startMs") return `Start Time (${zoneName})`
+                  if (id === "endMs") return `End Time (${zoneName})`
+                  return fallback
+                }}
+              />
+            )}
           </div>
 
           {tableView === "transactions" ? (
@@ -1857,109 +1943,143 @@ export function Exporter() {
           {tableView === "minutes" ? (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1680px] border-collapse text-sm">
+              <table className="w-full border-collapse text-sm" style={{ minWidth: tableMinWidth(daColCount) }}>
                 <caption className="sr-only">
                   Deep Analysis ({intervalLabel}) for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
                 <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
                   <tr>
-                    <MinuteSortHeader label="No" column="no" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label={`Start Time (${zoneName})`} column="startMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} />
-                    <MinuteSortHeader label={`End Time (${zoneName})`} column="endMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} />
-                    <MinuteSortHeader label="Buy Count" column="buyCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Sell Count" column="sellCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Average Buy Speed" column="avgBuySpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Average Sell Speed" column="avgSellSpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label={`Start Pool ${pool.quoteSymbol}`} column="startQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label={`End Pool ${pool.quoteSymbol}`} column="endQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Start M. Cap" column="startMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="End M. Cap" column="endMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Start Price" column="startPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="End Price" column="endPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Start Holders" column="startHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="End Holders" column="endHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Gas Fee" column="endGasPriceGwei" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
-                    <MinuteSortHeader label="Gas Fee Total" column="endGasFeeTotalEth" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    {showDa("no") ? <MinuteSortHeader label="No" column="no" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("startMs") ? <MinuteSortHeader label={`Start Time (${zoneName})`} column="startMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} /> : null}
+                    {showDa("endMs") ? <MinuteSortHeader label={`End Time (${zoneName})`} column="endMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} /> : null}
+                    {showDa("buyCount") ? <MinuteSortHeader label="Buy Count" column="buyCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("sellCount") ? <MinuteSortHeader label="Sell Count" column="sellCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("avgBuySpeedSec") ? <MinuteSortHeader label="Average Buy Speed" column="avgBuySpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("avgSellSpeedSec") ? <MinuteSortHeader label="Average Sell Speed" column="avgSellSpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("startQuoteReserve") ? <MinuteSortHeader label={`Start Pool ${pool.quoteSymbol}`} column="startQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endQuoteReserve") ? <MinuteSortHeader label={`End Pool ${pool.quoteSymbol}`} column="endQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("startMarketCapUsd") ? <MinuteSortHeader label="Start M. Cap" column="startMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endMarketCapUsd") ? <MinuteSortHeader label="End M. Cap" column="endMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("startPriceUsd") ? <MinuteSortHeader label="Start Price" column="startPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endPriceUsd") ? <MinuteSortHeader label="End Price" column="endPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("startHolders") ? <MinuteSortHeader label="Start Holders" column="startHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endHolders") ? <MinuteSortHeader label="End Holders" column="endHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endGasPriceGwei") ? <MinuteSortHeader label="Gas Fee" column="endGasPriceGwei" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endGasFeeTotalEth") ? <MinuteSortHeader label="Gas Fee Total" column="endGasFeeTotalEth" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {minutePageRows.length === 0 ? (
                     <tr>
-                      <td colSpan={17} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={Math.max(1, daColCount)} className="px-4 py-16 text-center text-muted-foreground">
                         {intervalTooFine ? "Interval too fine for this range." : "No Deep Analysis rows to show yet."}
                       </td>
                     </tr>
                   ) : (
                     minutePageRows.map((row) => (
                       <tr key={row.startMs} className="border-t border-border/80 hover:bg-muted/40">
-                        <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
-                          {row.no.toLocaleString("en-US")}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.start, intervalMs)}</td>
-                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.end, intervalMs)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-emerald-400">
-                          {row.buyCount.toLocaleString("en-US")}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-rose-400">
-                          {row.sellCount.toLocaleString("en-US")}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec, row.buyCount)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec, row.sellCount)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>
-                          {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
-                        </td>
-                        <td
-                          className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startQuoteReserve, row.endQuoteReserve)}`}
-                          title={row.endQuoteReserve ?? undefined}
-                        >
-                          {row.endQuoteReserve ? (
-                            <span className="inline-flex items-center justify-end gap-1.5">
-                              {formatPoolSize(row.endQuoteReserve)}
-                              <TradeSizeIcon
-                                usd={quoteAmountToUsd(
-                                  quoteAbsDelta(row.startQuoteReserve, row.endQuoteReserve),
-                                  quoteUsdPrice,
-                                )}
-                              />
-                            </span>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">
-                          {row.startMarketCapUsd ? formatUsdInteger(row.startMarketCapUsd) : "—"}
-                        </td>
-                        <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startMarketCapUsd, row.endMarketCapUsd)}`}>
-                          {row.endMarketCapUsd ? formatUsdInteger(row.endMarketCapUsd) : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">
-                          {row.startPriceUsd ? `$${formatTiny(Number(row.startPriceUsd))}` : "—"}
-                        </td>
-                        <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
-                          {row.endPriceUsd ? `$${formatTiny(Number(row.endPriceUsd))}` : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
-                          {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
-                        </td>
-                        <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
-                          {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                          title={row.endGasPriceGwei ? `${row.endGasPriceGwei} gwei at end of interval` : "Gas price unavailable"}
-                        >
-                          {row.endGasPriceGwei ? `${row.endGasPriceGwei} gwei` : "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                          title={
-                            row.endGasFeeTotalEth
-                              ? `${row.endGasFeeTotalEth} ETH cumulative gas through end of interval`
-                              : "Gas fee total unavailable"
-                          }
-                        >
-                          {row.endGasFeeTotalEth ? `${row.endGasFeeTotalEth} ETH` : "—"}
-                        </td>
+                        {showDa("no") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
+                            {row.no.toLocaleString("en-US")}
+                          </td>
+                        ) : null}
+                        {showDa("startMs") ? (
+                          <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.start, intervalMs)}</td>
+                        ) : null}
+                        {showDa("endMs") ? (
+                          <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatBucketLabel(row.end, intervalMs)}</td>
+                        ) : null}
+                        {showDa("buyCount") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-emerald-400">
+                            {row.buyCount.toLocaleString("en-US")}
+                          </td>
+                        ) : null}
+                        {showDa("sellCount") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-rose-400">
+                            {row.sellCount.toLocaleString("en-US")}
+                          </td>
+                        ) : null}
+                        {showDa("avgBuySpeedSec") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgBuySpeedSec, row.buyCount)}</td>
+                        ) : null}
+                        {showDa("avgSellSpeedSec") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">{formatSpeed(row.avgSellSpeedSec, row.sellCount)}</td>
+                        ) : null}
+                        {showDa("startQuoteReserve") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>
+                            {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endQuoteReserve") ? (
+                          <td
+                            className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startQuoteReserve, row.endQuoteReserve)}`}
+                            title={row.endQuoteReserve ?? undefined}
+                          >
+                            {row.endQuoteReserve ? (
+                              <span className="inline-flex items-center justify-end gap-1.5">
+                                {formatPoolSize(row.endQuoteReserve)}
+                                <TradeSizeIcon
+                                  usd={quoteAmountToUsd(
+                                    quoteAbsDelta(row.startQuoteReserve, row.endQuoteReserve),
+                                    quoteUsdPrice,
+                                  )}
+                                />
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                        {showDa("startMarketCapUsd") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">
+                            {row.startMarketCapUsd ? formatUsdInteger(row.startMarketCapUsd) : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endMarketCapUsd") ? (
+                          <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startMarketCapUsd, row.endMarketCapUsd)}`}>
+                            {row.endMarketCapUsd ? formatUsdInteger(row.endMarketCapUsd) : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("startPriceUsd") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">
+                            {row.startPriceUsd ? `$${formatTiny(Number(row.startPriceUsd))}` : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endPriceUsd") ? (
+                          <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
+                            {row.endPriceUsd ? `$${formatTiny(Number(row.endPriceUsd))}` : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("startHolders") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
+                            {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endHolders") ? (
+                          <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
+                            {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endGasPriceGwei") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={row.endGasPriceGwei ? `${displayGwei(row.endGasPriceGwei)} gwei at end of interval` : "Gas price unavailable"}
+                          >
+                            {displayGwei(row.endGasPriceGwei) ? `${displayGwei(row.endGasPriceGwei)} gwei` : "—"}
+                          </td>
+                        ) : null}
+                        {showDa("endGasFeeTotalEth") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={
+                              row.endGasFeeTotalEth
+                                ? `${row.endGasFeeTotalEth} ETH cumulative gas through end of interval`
+                                : "Gas fee total unavailable"
+                            }
+                          >
+                            {row.endGasFeeTotalEth ? `${row.endGasFeeTotalEth} ETH` : "—"}
+                          </td>
+                        ) : null}
                       </tr>
                     ))
                   )}
@@ -1970,7 +2090,7 @@ export function Exporter() {
           ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1920px] border-collapse text-sm">
+              <table className="w-full border-collapse text-sm" style={{ minWidth: tableMinWidth(txColCount + 1) }}>
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -1997,45 +2117,47 @@ export function Exporter() {
                         {sortKey === "selected" ? sortDesc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-50" />}
                       </button>
                     </th>
-                    <SortHeader label="No" column="txNo" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={`Date (${zoneName})`} column="timestamp" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
-                    <SortHeader label="Type" column="type" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
-                    <SortHeader label="Price (USD)" column="priceUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label="M. Cap" column="marketCapUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label="Total" column="totalUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={`Price (${pool.quoteSymbol})`} column="priceQuote" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={pool.baseSymbol} column="baseAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={pool.quoteSymbol} column="quoteAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={`Pool ${pool.baseSymbol}`} column="baseReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label="Gas Fee" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
-                    <th
-                      className="px-3 py-2 font-medium text-left"
-                      aria-sort={
-                        sortKey === "maker" || sortKey === "makerTxCount" ? (sortDesc ? "descending" : "ascending") : "none"
-                      }
-                    >
-                      <span className="inline-flex items-center gap-3">
-                        <SortButton label="Maker" column="maker" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
-                        <SortButton
-                          label="Txns"
-                          column="makerTxCount"
-                          sortKey={sortKey}
-                          desc={sortDesc}
-                          onSort={toggleSort}
-                        />
-                      </span>
-                    </th>
-                    <SortHeader label="Funded by" column="fundedBy" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
-                    <SortHeader label="Others" column="others" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
+                    {showTx("txNo") ? <SortHeader label="No" column="txNo" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("timestamp") ? <SortHeader label={`Date (${zoneName})`} column="timestamp" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} /> : null}
+                    {showTx("type") ? <SortHeader label="Type" column="type" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} /> : null}
+                    {showTx("priceUsd") ? <SortHeader label="Price (USD)" column="priceUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("marketCapUsd") ? <SortHeader label="M. Cap" column="marketCapUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("totalUsd") ? <SortHeader label="Total" column="totalUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("priceQuote") ? <SortHeader label={`Price (${pool.quoteSymbol})`} column="priceQuote" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("baseAmount") ? <SortHeader label={pool.baseSymbol} column="baseAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("quoteAmount") ? <SortHeader label={pool.quoteSymbol} column="quoteAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("baseReserve") ? <SortHeader label={`Pool ${pool.baseSymbol}`} column="baseReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("quoteReserve") ? <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("holders") ? <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("gasPriceGwei") ? <SortHeader label="Gas Fee" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("gasFeeTotalEth") ? <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("maker") ? (
+                      <th
+                        className="px-3 py-2 font-medium text-left"
+                        aria-sort={
+                          sortKey === "maker" || sortKey === "makerTxCount" ? (sortDesc ? "descending" : "ascending") : "none"
+                        }
+                      >
+                        <span className="inline-flex items-center gap-3">
+                          <SortButton label="Maker" column="maker" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} />
+                          <SortButton
+                            label="Txns"
+                            column="makerTxCount"
+                            sortKey={sortKey}
+                            desc={sortDesc}
+                            onSort={toggleSort}
+                          />
+                        </span>
+                      </th>
+                    ) : null}
+                    {showTx("fundedBy") ? <SortHeader label="Funded by" column="fundedBy" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} /> : null}
+                    {showTx("others") ? <SortHeader label="Others" column="others" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} /> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={18} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={Math.max(1, txColCount + 1)} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : trades.length === 0
@@ -2063,132 +2185,166 @@ export function Exporter() {
                             onChange={() => {}}
                           />
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums" title="Transaction number (oldest = 1)">
-                          {trade.txNo.toLocaleString("en-US")}
-                        </td>
-                        <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
-                        <td className="px-3 py-2">
-                          <span className={`font-semibold ${TYPE_TONE[trade.type]}`}>
-                            {trade.type}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceUsd ? `$${formatTiny(Number(trade.priceUsd))}` : "—"}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={trade.marketCapUsd ?? "Market cap unavailable"}>
-                          {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">
-                          <span className="inline-flex items-center justify-end gap-1.5">
-                            {formatUsd(trade.totalUsd)}
-                            <TradeSizeIcon usd={trade.totalUsd} />
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceQuote ? formatTiny(Number(trade.priceQuote)) : "—"}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={formatGroupedAmount(trade.baseAmount)}>
-                          {formatIntegerAmount(trade.baseAmount)}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">{formatGroupedAmount(trade.quoteAmount)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={trade.baseReserve ?? "Pool size unavailable"}>
-                          {trade.baseReserve ? formatIntegerAmount(trade.baseReserve) : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={trade.quoteReserve ?? "Pool size unavailable"}>
-                          {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                          title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
-                        >
-                          {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                          title={trade.gasPriceGwei ? `${trade.gasPriceGwei} gwei effective gas price` : "Gas price unavailable"}
-                        >
-                          {trade.gasPriceGwei ? `${trade.gasPriceGwei} gwei` : "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                          title={
-                            trade.gasFeeTotalEth
-                              ? `${trade.gasFeeTotalEth} ETH spent on gas through this transaction (unique txs only)`
-                              : "Gas fee total unavailable"
-                          }
-                        >
-                          {trade.gasFeeTotalEth ? `${trade.gasFeeTotalEth} ETH` : "—"}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {trade.maker ? (
-                            <>
+                        {showTx("txNo") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums" title="Transaction number (oldest = 1)">
+                            {trade.txNo.toLocaleString("en-US")}
+                          </td>
+                        ) : null}
+                        {showTx("timestamp") ? (
+                          <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
+                        ) : null}
+                        {showTx("type") ? (
+                          <td className="px-3 py-2">
+                            <span className={`font-semibold ${TYPE_TONE[trade.type]}`}>
+                              {trade.type}
+                            </span>
+                          </td>
+                        ) : null}
+                        {showTx("priceUsd") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceUsd ? `$${formatTiny(Number(trade.priceUsd))}` : "—"}</td>
+                        ) : null}
+                        {showTx("marketCapUsd") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.marketCapUsd ?? "Market cap unavailable"}>
+                            {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("totalUsd") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">
+                            <span className="inline-flex items-center justify-end gap-1.5">
+                              {formatUsd(trade.totalUsd)}
+                              <TradeSizeIcon usd={trade.totalUsd} />
+                            </span>
+                          </td>
+                        ) : null}
+                        {showTx("priceQuote") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceQuote ? formatTiny(Number(trade.priceQuote)) : "—"}</td>
+                        ) : null}
+                        {showTx("baseAmount") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs" title={formatGroupedAmount(trade.baseAmount)}>
+                            {formatIntegerAmount(trade.baseAmount)}
+                          </td>
+                        ) : null}
+                        {showTx("quoteAmount") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs">{formatGroupedAmount(trade.quoteAmount)}</td>
+                        ) : null}
+                        {showTx("baseReserve") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.baseReserve ?? "Pool size unavailable"}>
+                            {trade.baseReserve ? formatIntegerAmount(trade.baseReserve) : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("quoteReserve") ? (
+                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.quoteReserve ?? "Pool size unavailable"}>
+                            {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("holders") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
+                          >
+                            {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("gasPriceGwei") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={displayGwei(trade.gasPriceGwei) ? `${displayGwei(trade.gasPriceGwei)} gwei effective gas price` : "Gas price unavailable"}
+                          >
+                            {displayGwei(trade.gasPriceGwei) ? `${displayGwei(trade.gasPriceGwei)} gwei` : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("gasFeeTotalEth") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            title={
+                              trade.gasFeeTotalEth
+                                ? `${trade.gasFeeTotalEth} ETH spent on gas through this transaction (unique txs only)`
+                                : "Gas fee total unavailable"
+                            }
+                          >
+                            {trade.gasFeeTotalEth ? `${trade.gasFeeTotalEth} ETH` : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("maker") ? (
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {trade.maker ? (
+                              <>
+                                <a
+                                  className="font-mono text-xs hover:text-primary"
+                                  href={`${pool.explorerAddress}/${trade.maker}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {shortAddress(trade.maker)}
+                                </a>
+                                <MakerCountButton
+                                  maker={trade.maker}
+                                  count={trade.makerTxCount}
+                                  summary={makerSummaries.get(normalizeAddress(trade.maker)) ?? null}
+                                  baseSymbol={pool.baseSymbol}
+                                  quoteSymbol={pool.quoteSymbol}
+                                  priceUsd={pool.priceUsd}
+                                  priceQuote={quotePrice}
+                                  partial={capped}
+                                  onFilter={() => {
+                                    setQuery(trade.maker)
+                                    setPage(0)
+                                  }}
+                                />
+                              </>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                        {showTx("fundedBy") ? (
+                          <td className="px-3 py-2">
+                            {trade.fundedBy && trade.fundedByAddress ? (
                               <a
-                                className="font-mono text-xs hover:text-primary"
-                                href={`${pool.explorerAddress}/${trade.maker}`}
+                                className="text-xs font-medium text-rose-300 hover:text-rose-200"
+                                href={`${pool.explorerAddress}/${trade.fundedByAddress}`}
                                 target="_blank"
                                 rel="noreferrer"
                               >
-                                {shortAddress(trade.maker)}
+                                {trade.fundedBy}
                               </a>
-                              <MakerCountButton
-                                maker={trade.maker}
-                                count={trade.makerTxCount}
-                                summary={makerSummaries.get(normalizeAddress(trade.maker)) ?? null}
-                                baseSymbol={pool.baseSymbol}
-                                quoteSymbol={pool.quoteSymbol}
-                                priceUsd={pool.priceUsd}
-                                priceQuote={quotePrice}
-                                partial={capped}
-                                onFilter={() => {
-                                  setQuery(trade.maker)
-                                  setPage(0)
-                                }}
-                              />
-                            </>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {trade.fundedBy && trade.fundedByAddress ? (
-                            <a
-                              className="text-xs font-medium text-rose-300 hover:text-rose-200"
-                              href={`${pool.explorerAddress}/${trade.fundedByAddress}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {trade.fundedBy}
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span className="inline-flex items-center gap-2">
-                            {trade.makerTags.includes("bot") ? (
-                              <span
-                                className="text-amber-400"
-                                title="Bot / Smart contract: this transaction went straight to the pool or through a contract with unpublished source code."
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                        {showTx("others") ? (
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className="inline-flex items-center gap-2">
+                              {trade.makerTags.includes("bot") ? (
+                                <span
+                                  className="text-amber-400"
+                                  title="Bot / Smart contract: this transaction went straight to the pool or through a contract with unpublished source code."
+                                >
+                                  <Bot className="size-4" aria-label="Bot or smart contract" />
+                                </span>
+                              ) : null}
+                              {trade.makerTags.includes("team") ? (
+                                <span
+                                  className="text-amber-400"
+                                  title="Team wallet: deployed this token or added the pool’s first liquidity."
+                                >
+                                  <Users className="size-4" aria-label="Team wallet" />
+                                </span>
+                              ) : null}
+                              <a
+                                className="text-muted-foreground hover:text-foreground"
+                                href={`${pool.explorerTx}/${trade.txHash}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open this transaction on the explorer"
+                                aria-label={`Open transaction ${trade.txHash} on the explorer`}
                               >
-                                <Bot className="size-4" aria-label="Bot or smart contract" />
-                              </span>
-                            ) : null}
-                            {trade.makerTags.includes("team") ? (
-                              <span
-                                className="text-amber-400"
-                                title="Team wallet: deployed this token or added the pool’s first liquidity."
-                              >
-                                <Users className="size-4" aria-label="Team wallet" />
-                              </span>
-                            ) : null}
-                            <a
-                              className="text-muted-foreground hover:text-foreground"
-                              href={`${pool.explorerTx}/${trade.txHash}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="Open this transaction on the explorer"
-                              aria-label={`Open transaction ${trade.txHash} on the explorer`}
-                            >
-                              <ExternalLink className="size-4" />
-                            </a>
-                          </span>
-                        </td>
+                                <ExternalLink className="size-4" />
+                              </a>
+                            </span>
+                          </td>
+                        ) : null}
                       </tr>
                     ))
                   )}
@@ -2258,11 +2414,6 @@ export function Exporter() {
               </div>
             </div>
           </nav>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Amounts come from the pool’s on-chain Swap, Mint (ADD) and Burn (REMOVE) events; for ADD and REMOVE the two amounts are the tokens deposited or withdrawn and Total is the quote-token side in USD. USD totals multiply the quote token by its historical price from DefiLlama. The {pool.baseSymbol} column is a whole number of tokens; hover a cell for the exact amount. The CSV keeps the full on-chain value.
-            The CSV includes every row that matches the filters, not only the current page
-            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers (the pool contract and burn addresses are excluded). Gas Fee is that transaction’s effective gas price in gwei (3 decimals); Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). Deep Analysis adds the same gas columns per interval and the chart Y-axis can plot Gas Fee / Gas Fee Total. The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
-          </p>
         </section>
       ) : phase === "idle" || phase === "error" ? (
         <section className="grid gap-3 sm:grid-cols-3">
