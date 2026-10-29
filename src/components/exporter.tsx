@@ -48,6 +48,7 @@ import {
   type MinuteRow,
 } from "@/lib/minute-tape"
 import {
+  cacheBookmarkMetas,
   clearSync,
   fetchRemoteBookmarks,
   formatSyncAgo,
@@ -56,6 +57,7 @@ import {
   hasSyncToken,
   isSyncSuccessful,
   publishBookmarks,
+  readCachedBookmarkMetas,
   setSyncToken,
   syncTokenHelpUrl,
   validateSyncToken,
@@ -254,9 +256,13 @@ export function Exporter() {
   async function refreshSavedList() {
     try {
       const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
+      if (local.length > 0) cacheBookmarkMetas(local)
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       const remote = await fetchRemoteBookmarks()
-      setSavedList(mergeSavedMeta(local, remote.bookmarks))
+      const merged = mergeSavedMeta(local, remote.bookmarks)
+      setSavedList(merged)
+      // Re-read status after pull — pull must not wipe a successful publish badge.
+      setSyncStatus(getSyncStatus())
     } catch {
       // IndexedDB / network may be unavailable; keep the live load path working.
     }
@@ -264,9 +270,11 @@ export function Exporter() {
 
   async function localBookmarksForPublish(): Promise<SavedAnalysisMeta[]> {
     const fromDb = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
-    if (fromDb.length > 0) return fromDb
-    // Fallback: metas already shown as local in the Open dialog.
-    return savedList.filter((item) => localSavedIds.has(item.id))
+    const fromUi = savedList.filter((item) => localSavedIds.has(item.id))
+    const fromCache = readCachedBookmarkMetas()
+    const merged = mergeSavedMeta(mergeSavedMeta(fromDb, fromUi), fromCache)
+    if (merged.length > 0) cacheBookmarkMetas(merged)
+    return merged
   }
 
   async function publishMergedBookmarks(nextLocal?: SavedAnalysisMeta[], tokenOverride?: string) {
@@ -276,6 +284,7 @@ export function Exporter() {
     if (local.length === 0) {
       throw new Error("No local saved pairs to publish. Save a pair on this browser first, then Publish now.")
     }
+    cacheBookmarkMetas(local)
     const remote = await fetchRemoteBookmarks()
     const merged = mergeSavedMeta(local, remote.bookmarks)
     if (merged.length === 0) {
@@ -283,7 +292,7 @@ export function Exporter() {
     }
     const catalog = await publishBookmarks(merged, token)
     setLocalSavedIds(new Set(local.map((item) => item.id)))
-    setSavedList(merged)
+    setSavedList(mergeSavedMeta(local, catalog.bookmarks))
     setSyncStatus(getSyncStatus())
     setSyncEnabled(true)
     return catalog
@@ -847,7 +856,7 @@ export function Exporter() {
     setSaveBusy(true)
     setSaveNotice(null)
     try {
-      await saveAnalysis({
+      const meta = await saveAnalysis({
         url: url.trim() || pool.dextoolsUrl,
         pool,
         trades: rawTrades,
@@ -855,6 +864,7 @@ export function Exporter() {
         warning,
         capped,
       })
+      cacheBookmarkMetas([meta])
       const local = await listSavedAnalyses()
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       if (hasSyncToken()) {
@@ -917,8 +927,9 @@ export function Exporter() {
       if (hasSyncToken()) {
         const remote = await fetchRemoteBookmarks()
         const merged = mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id)
-        await publishBookmarks(merged)
+        await publishBookmarks(merged, undefined, { allowEmpty: true })
         setSavedList(merged)
+        setSyncStatus(getSyncStatus())
         setSaveNotice("Removed this pair from this browser and the shared list.")
         return
       }
@@ -1019,6 +1030,11 @@ export function Exporter() {
       setShowSyncSetup(false)
       const status = getSyncStatus()
       setSyncStatus(status)
+      if (!isSyncSuccessful(status) || catalog.bookmarks.length === 0) {
+        setSyncMessage("Token saved, but the shared list is still empty. Click Publish now after saving pairs here.")
+        setSaveNotice("Token saved. Publish again once this browser has saved pairs.")
+        return
+      }
       setSyncMessage(
         `Synced ${catalog.bookmarks.length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
       )
@@ -1046,6 +1062,10 @@ export function Exporter() {
       const catalog = await publishMergedBookmarks(local)
       const status = getSyncStatus()
       setSyncStatus(status)
+      if (!isSyncSuccessful(status) || catalog.bookmarks.length === 0) {
+        setSyncMessage("Shared list is still empty after publish. Save pairs on this browser, then try again.")
+        return
+      }
       setSyncMessage(`Synced · ${catalog.bookmarks.length} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
       setSaveNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`)
     } catch (error) {

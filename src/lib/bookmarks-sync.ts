@@ -1,12 +1,16 @@
 import type { SavedAnalysisMeta } from "./saved-analyses"
+import { mergeSavedMeta } from "./saved-analyses"
 
 /** Shared bookmark catalog lives in the pairsheet repo so every browser can read it. */
 export const SYNC_REPO = "NeverSMILE0825/pairsheet"
 export const SYNC_PATH = "public/data/bookmarks.json"
 export const SYNC_TOKEN_KEY = "pairsheet.githubSyncToken"
 export const SYNC_STATUS_KEY = "pairsheet.githubSyncStatus"
+/** Last known metas on this browser — backup if IndexedDB briefly fails during publish. */
+export const BOOKMARK_CACHE_KEY = "pairsheet.bookmarkMetaCache"
 
 const RAW_URL = `https://raw.githubusercontent.com/${SYNC_REPO}/main/${SYNC_PATH}`
+const PAGES_URL = `https://neversmile0825.github.io/pairsheet/data/bookmarks.json`
 const CONTENTS_URL = `https://api.github.com/repos/${SYNC_REPO}/contents/${SYNC_PATH}`
 
 export type BookmarkCatalog = {
@@ -61,7 +65,10 @@ export function getSyncStatus(): SyncStatus {
       lastOkAt: typeof parsed.lastOkAt === "string" ? parsed.lastOkAt : null,
       lastError: typeof parsed.lastError === "string" ? parsed.lastError : null,
       lastCount: typeof parsed.lastCount === "number" ? parsed.lastCount : 0,
-      lastAction: parsed.lastAction === "publish" || parsed.lastAction === "pull" || parsed.lastAction === "validate" ? parsed.lastAction : null,
+      lastAction:
+        parsed.lastAction === "publish" || parsed.lastAction === "pull" || parsed.lastAction === "validate"
+          ? parsed.lastAction
+          : null,
     }
   } catch {
     return { enabled: hasSyncToken(), lastOkAt: null, lastError: null, lastCount: 0, lastAction: null }
@@ -131,22 +138,51 @@ function authErrorMessage(status: number, detail: string): string {
   return `GitHub error (${status}): ${detail}`
 }
 
-/** Public read — no token. Uses raw GitHub so updates show before Pages finishes redeploying. */
-export async function fetchRemoteBookmarks(): Promise<BookmarkCatalog> {
+export function readCachedBookmarkMetas(): SavedAnalysisMeta[] {
+  if (typeof window === "undefined") return []
   try {
-    const response = await fetch(`${RAW_URL}?t=${Date.now()}`, {
+    const parsed = JSON.parse(window.localStorage.getItem(BOOKMARK_CACHE_KEY) || "null") as unknown
+    if (!Array.isArray(parsed)) return []
+    return parseCatalog({ version: 1, updatedAt: null, bookmarks: parsed }).bookmarks
+  } catch {
+    return []
+  }
+}
+
+export function cacheBookmarkMetas(metas: SavedAnalysisMeta[]): void {
+  if (typeof window === "undefined") return
+  try {
+    const merged = mergeSavedMeta(metas, readCachedBookmarkMetas())
+    window.localStorage.setItem(BOOKMARK_CACHE_KEY, JSON.stringify(merged))
+  } catch {
+    // Storage blocked.
+  }
+}
+
+async function fetchCatalogFromUrl(url: string): Promise<BookmarkCatalog | null> {
+  try {
+    const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, {
       cache: "no-store",
       signal: AbortSignal.timeout(12_000),
     })
-    if (!response.ok) return emptyCatalog()
-    const catalog = parseCatalog(await response.json())
-    if (catalog.bookmarks.length > 0 || catalog.updatedAt) {
-      writeSyncStatus({ lastAction: "pull", lastCount: catalog.bookmarks.length })
-    }
-    return catalog
+    if (!response.ok) return null
+    return parseCatalog(await response.json())
   } catch {
-    return emptyCatalog()
+    return null
   }
+}
+
+/**
+ * Public read — no token.
+ * Prefer raw GitHub (updates before Pages redeploys), then the live Pages URL.
+ * Never mutates publish success status — opening the dialog must not flip the badge to "Not synced".
+ */
+export async function fetchRemoteBookmarks(): Promise<BookmarkCatalog> {
+  const fromRaw = await fetchCatalogFromUrl(RAW_URL)
+  if (fromRaw && (fromRaw.bookmarks.length > 0 || fromRaw.updatedAt)) return fromRaw
+  const fromPages = await fetchCatalogFromUrl(PAGES_URL)
+  if (fromPages) return fromPages
+  return fromRaw ?? emptyCatalog()
 }
 
 type GitHubContent = {
@@ -188,7 +224,9 @@ function toBase64(text: string): string {
 }
 
 /** Confirm the token can read the bookmarks file (or create it). */
-export async function validateSyncToken(token = getSyncToken()): Promise<{ ok: true; login?: string } | { ok: false; error: string }> {
+export async function validateSyncToken(
+  token = getSyncToken(),
+): Promise<{ ok: true; login?: string } | { ok: false; error: string }> {
   const value = token.trim()
   if (!value) return { ok: false, error: "Paste a GitHub fine-grained token first." }
   if (!value.startsWith("github_pat_") && !value.startsWith("ghp_")) {
@@ -232,18 +270,22 @@ async function putCatalog(token: string, catalog: BookmarkCatalog, sha: string):
   })
 }
 
-/** True when the last publish succeeded and is still the known state. */
+/** True when a real non-empty publish landed and has not failed since. */
 export function isSyncSuccessful(status: SyncStatus = getSyncStatus()): boolean {
-  return Boolean(status.enabled && status.lastOkAt && !status.lastError && status.lastAction === "publish")
+  return Boolean(status.enabled && status.lastOkAt && !status.lastError && status.lastCount > 0)
 }
 
 /** Publish the merged bookmark list to the repo (requires a fine-grained PAT with Contents: Write). */
 export async function publishBookmarks(
   bookmarks: SavedAnalysisMeta[],
   tokenOverride?: string,
+  options?: { allowEmpty?: boolean },
 ): Promise<BookmarkCatalog> {
   const token = (tokenOverride ?? getSyncToken()).trim()
   if (!token) throw new Error("Add a GitHub sync token first.")
+  if (bookmarks.length === 0 && !options?.allowEmpty) {
+    throw new Error("No local saved pairs to publish. Save a pair on this browser first, then Publish now.")
+  }
 
   const catalog: BookmarkCatalog = {
     version: 1,
@@ -265,14 +307,24 @@ export async function publishBookmarks(
       writeSyncStatus({ lastError: message, lastAction: "publish", lastOkAt: null })
       throw new Error(message)
     }
+
+    // Confirm Contents API matches what we sent (never report success on a silent empty write).
+    const verified = await readRemoteFile(token)
+    if (catalog.bookmarks.length > 0 && verified.catalog.bookmarks.length === 0) {
+      const message = "Publish wrote an empty shared list. Try Publish now again."
+      writeSyncStatus({ lastError: message, lastAction: "publish", lastOkAt: null, lastCount: 0 })
+      throw new Error(message)
+    }
+
+    if (verified.catalog.bookmarks.length > 0) cacheBookmarkMetas(verified.catalog.bookmarks)
     writeSyncStatus({
-      lastOkAt: catalog.updatedAt,
+      lastOkAt: verified.catalog.updatedAt ?? catalog.updatedAt,
       lastError: null,
-      lastCount: catalog.bookmarks.length,
+      lastCount: verified.catalog.bookmarks.length,
       lastAction: "publish",
       enabled: true,
     })
-    return catalog
+    return verified.catalog
   } catch (error) {
     if (error instanceof Error && (error.message.startsWith("GitHub") || error.message.includes("PAT"))) throw error
     const message = error instanceof Error ? error.message : "Publish failed."
