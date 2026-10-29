@@ -43,7 +43,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       "M. Cap is unit price × token supply when supply is known.",
       "Pool columns are the pool balances right after that event (hover for the exact value).",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded).",
-      "Gas Fee = that transaction’s effective gas price in gwei (3 decimals). Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
+      "Gas Price = that transaction’s effective gas price in gwei (3 decimals) from the receipt (base fee + priority tip). Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
+      "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "After the tape finishes loading, Pair Sheet retries receipt lookups for any missing gas (multi-pass, several RPCs) and recomputes Gas Fee Total across the full history.",
       "Opening an older saved tape recalculates missing or non-3-decimal gas columns and asks whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
@@ -53,6 +54,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Reading Gas Fee Total",
         body: "If row No. 1 cost 0.0010 ETH gas and row No. 2 cost 0.0005 ETH, Gas Fee Total on row 2 shows 0.0015 ETH. Two events in the same txHash only add once.",
+      },
+      {
+        title: "High Gas Price vs gas tracker",
+        body: "On Oct 26 16:12:59 EDT a GINNAN sell paid 28.562 gwei effective while the block base fee was ~0.046 gwei — the sender set a 28.562 gwei priority tip. Pair Sheet shows the receipt value; the gas tracker only plots base-fee averages.",
       },
       {
         title: "Holders after a buy",
@@ -67,8 +72,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket.",
       "Start / End pool quote, mcap, price, and holders show how the bucket opened and closed.",
-      "Gas Fee / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
-      "Chart Y-axis includes Gas Fee and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",
+      "Gas Price / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
+      "Chart Y-axis includes Gas Price and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",
     ],
     examples: [
       {
@@ -120,7 +125,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "ETH price comes from Coinbase (fallback CoinGecko). Click for 24h / 1h detail.",
       "Gas Standard / Fast / Rapid are estimated from recent feeHistory (base fee + tip).",
-      "These live widgets are independent of each row’s Gas Fee column (which uses that tx’s receipt).",
+      "These live widgets are independent of each row’s Gas Price column (which uses that tx’s receipt).",
     ],
   },
   {

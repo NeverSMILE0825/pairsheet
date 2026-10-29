@@ -34,7 +34,7 @@ const Y_OPTIONS: { id: ChartYMetric; label: string }[] = [
   { id: "marketCap", label: "M. Cap" },
   { id: "price", label: "Price" },
   { id: "holders", label: "Holders" },
-  { id: "gasFee", label: "Gas Fee" },
+  { id: "gasFee", label: "Gas Price" },
   { id: "gasFeeTotal", label: "Gas Fee Total" },
 ]
 

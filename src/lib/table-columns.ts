@@ -60,7 +60,7 @@ export const TX_COLUMN_DEFS: ColumnDef<TxColumnId>[] = [
   { id: "baseReserve", label: "Pool base" },
   { id: "quoteReserve", label: "Pool quote" },
   { id: "holders", label: "Holders" },
-  { id: "gasPriceGwei", label: "Gas Fee" },
+  { id: "gasPriceGwei", label: "Gas Price" },
   { id: "gasFeeTotalEth", label: "Gas Fee Total" },
   { id: "maker", label: "Maker / Txns" },
   { id: "fundedBy", label: "Funded by" },
@@ -83,7 +83,7 @@ export const DA_COLUMN_DEFS: ColumnDef<DaColumnId>[] = [
   { id: "endPriceUsd", label: "End Price" },
   { id: "startHolders", label: "Start Holders" },
   { id: "endHolders", label: "End Holders" },
-  { id: "endGasPriceGwei", label: "Gas Fee" },
+  { id: "endGasPriceGwei", label: "Gas Price" },
   { id: "endGasFeeTotalEth", label: "Gas Fee Total" },
 ]
 

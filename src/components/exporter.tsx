@@ -2107,7 +2107,7 @@ export function Exporter() {
                     {showDa("endPriceUsd") ? <MinuteSortHeader label="End Price" column="endPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
                     {showDa("startHolders") ? <MinuteSortHeader label="Start Holders" column="startHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
                     {showDa("endHolders") ? <MinuteSortHeader label="End Holders" column="endHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
-                    {showDa("endGasPriceGwei") ? <MinuteSortHeader label="Gas Fee" column="endGasPriceGwei" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
+                    {showDa("endGasPriceGwei") ? <MinuteSortHeader label="Gas Price" column="endGasPriceGwei" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" title="Effective gas price (gwei) on the last trade in the bucket — base fee + priority tip from the receipt, not the network gas-tracker average" /> : null}
                     {showDa("endGasFeeTotalEth") ? <MinuteSortHeader label="Gas Fee Total" column="endGasFeeTotalEth" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
                   </tr>
                 </thead>
@@ -2272,8 +2272,8 @@ export function Exporter() {
                     {showTx("baseReserve") ? <SortHeader label={`Pool ${pool.baseSymbol}`} column="baseReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
                     {showTx("quoteReserve") ? <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
                     {showTx("holders") ? <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
-                    {showTx("gasPriceGwei") ? <SortHeader label="Gas Fee" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
-                    {showTx("gasFeeTotalEth") ? <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
+                    {showTx("gasPriceGwei") ? <SortHeader label="Gas Price" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" title="Effective gas price paid by this tx (gwei) = base fee + priority tip from the receipt. Bots often tip far above the Etherscan gas-tracker average." /> : null}
+                    {showTx("gasFeeTotalEth") ? <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" title="Running sum of unique-tx gas costs (ETH) from the oldest loaded trade through this row" /> : null}
                     {showTx("maker") ? (
                       <th
                         className="px-3 py-2 font-medium text-left"
@@ -2391,7 +2391,11 @@ export function Exporter() {
                         {showTx("gasPriceGwei") ? (
                           <td
                             className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                            title={displayGwei(trade.gasPriceGwei) ? `${displayGwei(trade.gasPriceGwei)} gwei effective gas price` : "Gas price unavailable"}
+                            title={
+                              displayGwei(trade.gasPriceGwei)
+                                ? `${displayGwei(trade.gasPriceGwei)} gwei effective gas price (receipt base + priority). Not the network gas-tracker average.`
+                                : "Gas price unavailable"
+                            }
                           >
                             {displayGwei(trade.gasPriceGwei) ? `${displayGwei(trade.gasPriceGwei)} gwei` : "—"}
                           </td>
@@ -2401,7 +2405,7 @@ export function Exporter() {
                             className="px-3 py-2 text-right font-mono text-xs tabular-nums"
                             title={
                               trade.gasFeeTotalEth
-                                ? `${trade.gasFeeTotalEth} ETH spent on gas through this transaction (unique txs only)`
+                                ? `${trade.gasFeeTotalEth} ETH cumulative gas through this row (unique tx hashes only)`
                                 : "Gas fee total unavailable"
                             }
                           >
@@ -2666,6 +2670,7 @@ function SortHeader({
   desc,
   onSort,
   align = "left",
+  title,
 }: {
   label: string
   column: SortKey
@@ -2673,12 +2678,14 @@ function SortHeader({
   desc: boolean
   onSort: (column: SortKey) => void
   align?: "left" | "right"
+  title?: string
 }) {
   const active = sortKey === column
   return (
     <th
       className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}
       aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
+      title={title}
     >
       <SortButton label={label} column={column} sortKey={sortKey} desc={desc} onSort={onSort} align={align} />
     </th>
@@ -2727,6 +2734,7 @@ function MinuteSortHeader({
   desc,
   onSort,
   align = "left",
+  title,
 }: {
   label: string
   column: MinuteSortKey
@@ -2734,12 +2742,14 @@ function MinuteSortHeader({
   desc: boolean
   onSort: (column: MinuteSortKey) => void
   align?: "left" | "right"
+  title?: string
 }) {
   const active = sortKey === column
   return (
     <th
       className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}
       aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
+      title={title}
     >
       <button
         type="button"
