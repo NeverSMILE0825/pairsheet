@@ -109,9 +109,12 @@ export async function rpcBatch(
       "user-agent": "PairSheet/1.0",
     },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
     cache: "no-store",
   })
+  if (response.status === 429 || response.status >= 500) {
+    throw new Error(`RPC batch failed (${response.status})`)
+  }
   if (!response.ok) {
     throw new Error(`RPC batch failed (${response.status})`)
   }
@@ -119,7 +122,37 @@ export async function rpcBatch(
   const rows = Array.isArray(json) ? json : [json]
   const results = new Map<number, unknown>()
   for (const row of rows) {
-    if (typeof row.id === "number" && row.result) results.set(row.id, row.result)
+    if (typeof row.id !== "number") continue
+    if (row.error) continue
+    if (row.result === undefined || row.result === null) continue
+    results.set(row.id, row.result)
   }
   return results
+}
+
+/** One JSON-RPC call; returns null when the node has no result for this method. */
+export async function rpcSingle(
+  rpc: string,
+  method: string,
+  params: unknown[],
+  timeout = 20000,
+): Promise<unknown | null> {
+  const response = await fetch(rpc, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "PairSheet/1.0",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(timeout),
+    cache: "no-store",
+  })
+  if (response.status === 429 || response.status >= 500) {
+    throw new Error(`RPC failed (${response.status})`)
+  }
+  if (!response.ok) throw new Error(`RPC failed (${response.status})`)
+  const body = (await response.json()) as RpcResponse
+  if (body.error) throw new Error(body.error.message || "RPC error")
+  return body.result === undefined ? null : body.result
 }

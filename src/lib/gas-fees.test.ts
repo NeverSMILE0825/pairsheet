@@ -3,8 +3,10 @@ import test from "node:test"
 import {
   applyGasFees,
   assignGasFeeTotals,
+  countMissingGas,
   formatEth4,
   formatGasPriceGwei,
+  mergeGasFees,
   normalizeGasPriceString,
   normalizeTradeGasFormats,
   parseReceiptGas,
@@ -106,4 +108,30 @@ test("normalizes legacy gas price strings to 3 decimals", () => {
   const fixed = normalizeTradeGasFormats(legacy)
   assert.equal(fixed.changed, true)
   assert.equal(fixed.trades[0].gasPriceGwei, "0.056")
+})
+
+test("mergeGasFees fills only missing rows and keeps existing fees", () => {
+  const rows = [
+    trade({
+      id: "have",
+      txHash: "0xaa",
+      blockNumber: 1,
+      logIndex: 0,
+      gasPriceGwei: "10.000",
+      gasFeeWei: "1000000000000000",
+      gasFeeTotalEth: "0.0010",
+    }),
+    trade({ id: "need", txHash: "0xbb", blockNumber: 2, logIndex: 0 }),
+  ]
+  assert.equal(countMissingGas(rows), 1)
+  const merged = mergeGasFees(
+    rows,
+    new Map([["0xbb", { gasUsed: 100_000n, effectiveGasPrice: 20_000_000_000n }]]),
+  )
+  const byId = Object.fromEntries(merged.map((row) => [row.id, row]))
+  assert.equal(byId.have.gasPriceGwei, "10.000")
+  assert.equal(byId.have.gasFeeWei, "1000000000000000")
+  assert.equal(byId.need.gasPriceGwei, "20.000")
+  assert.equal(byId.need.gasFeeTotalEth, "0.0030")
+  assert.equal(byId.have.gasFeeTotalEth, "0.0010")
 })

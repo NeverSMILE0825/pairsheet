@@ -1,13 +1,22 @@
-import { mapPool, rpcBatch } from "./http"
+import { mapPool, rpcBatch, rpcSingle, sleep } from "./http"
 import type { Trade } from "./types"
 
-const GWEI = 10n ** 9n
 const ETH = 10n ** 18n
 const CANONICAL_GWEI = /^\d+\.\d{3}$/
+
+const RECEIPT_BATCH = 12
+const RECEIPT_CONCURRENCY = 2
+const RECEIPT_ROUNDS = 5
 
 export type ReceiptGas = {
   gasUsed: bigint
   effectiveGasPrice: bigint
+}
+
+export type GasFillProgress = {
+  done: number
+  total: number
+  round: number
 }
 
 /** Effective gas price in gwei with exactly 3 decimal places (rounds half up). */
@@ -96,6 +105,24 @@ export function applyGasFees(
   return assignGasFeeTotals(withFees)
 }
 
+/** Merge newly fetched receipts into trades that are still missing gas (keeps existing values). */
+export function mergeGasFees(trades: Trade[], gasByTx: Map<string, ReceiptGas>): Trade[] {
+  if (gasByTx.size === 0) return assignGasFeeTotals(trades)
+  const withFees = trades.map((trade) => {
+    if (trade.gasPriceGwei && trade.gasFeeWei) return trade
+    const gas = gasByTx.get(trade.txHash.toLowerCase())
+    if (!gas) return trade
+    const feeWei = feeWeiFromReceipt(gas)
+    return {
+      ...trade,
+      gasPriceGwei: formatGasPriceGwei(gas.effectiveGasPrice),
+      gasFeeWei: feeWei.toString(),
+      gasFeeTotalEth: null as string | null,
+    }
+  })
+  return assignGasFeeTotals(withFees)
+}
+
 /** Recompute cumulative ETH totals from gasFeeWei (call after full history is loaded). */
 export function assignGasFeeTotals(trades: Trade[]): Trade[] {
   const ranked = [...trades].sort(
@@ -152,6 +179,14 @@ export function tradesNeedGasRepair(trades: Trade[]): boolean {
   )
 }
 
+export function countMissingGas(trades: Trade[]): number {
+  const hashes = new Set<string>()
+  for (const trade of trades) {
+    if (tradeNeedsGasFetch(trade)) hashes.add(trade.txHash.toLowerCase())
+  }
+  return hashes.size
+}
+
 /** Fix gwei formatting on already-saved trades (no RPC). */
 export function normalizeTradeGasFormats(trades: Trade[]): { trades: Trade[]; changed: boolean } {
   let changed = false
@@ -165,58 +200,115 @@ export function normalizeTradeGasFormats(trades: Trade[]): { trades: Trade[]; ch
   return { trades: next, changed }
 }
 
-export async function fetchReceiptGasMap(
+/**
+ * Fetch raw eth_getTransactionReceipt results with multi-round retries,
+ * RPC rotation, and single-call fallback when batches fail or come back partial.
+ */
+export async function fetchEthReceipts(
   rpcs: string[],
   hashes: string[],
-): Promise<Map<string, ReceiptGas>> {
-  const out = new Map<string, ReceiptGas>()
+  onProgress?: (progress: GasFillProgress) => void,
+): Promise<Map<string, unknown>> {
+  const out = new Map<string, unknown>()
   const unique = [...new Set(hashes.map((hash) => hash.toLowerCase()).filter(Boolean))]
   if (unique.length === 0 || rpcs.length === 0) return out
-  const batches: string[][] = []
-  for (let index = 0; index < unique.length; index += 20) batches.push(unique.slice(index, index + 20))
-  await mapPool(batches, 4, async (batch) => {
+
+  let pending = unique
+  for (let round = 0; round < RECEIPT_ROUNDS && pending.length > 0; round += 1) {
+    if (round > 0) await sleep(450 * round)
+    const batches: string[][] = []
+    for (let index = 0; index < pending.length; index += RECEIPT_BATCH) {
+      batches.push(pending.slice(index, index + RECEIPT_BATCH))
+    }
+    await mapPool(batches, RECEIPT_CONCURRENCY, async (batch) => {
+      const got = await fetchReceiptBatch(rpcs, batch)
+      for (const [hash, receipt] of got) out.set(hash, receipt)
+      onProgress?.({ done: out.size, total: unique.length, round: round + 1 })
+    })
+    pending = unique.filter((hash) => !out.has(hash))
+  }
+  onProgress?.({ done: out.size, total: unique.length, round: RECEIPT_ROUNDS })
+  return out
+}
+
+async function fetchReceiptBatch(rpcs: string[], batch: string[]): Promise<Map<string, unknown>> {
+  const found = new Map<string, unknown>()
+  let missing = [...batch]
+
+  for (const rpc of rpcs) {
+    if (missing.length === 0) break
+    try {
+      const results = await rpcBatch(
+        rpc,
+        missing.map((hash) => ({ method: "eth_getTransactionReceipt", params: [hash] })),
+      )
+      const still: string[] = []
+      missing.forEach((hash, id) => {
+        const receipt = results.get(id)
+        if (receipt && typeof receipt === "object") found.set(hash, receipt)
+        else still.push(hash)
+      })
+      missing = still
+    } catch {
+      // try next RPC or singles below
+    }
+  }
+
+  if (missing.length === 0) return found
+
+  // Public nodes often reject large batches or rate-limit them — finish with singles.
+  await mapPool(missing, 3, async (hash) => {
     for (const rpc of rpcs) {
       try {
-        const results = await rpcBatch(
-          rpc,
-          batch.map((hash) => ({ method: "eth_getTransactionReceipt", params: [hash] })),
-        )
-        results.forEach((receipt, id) => {
-          const hash = batch[id]
-          const gas = parseReceiptGas(receipt)
-          if (hash && gas) out.set(hash, gas)
-        })
-        if (batch.every((hash) => out.has(hash))) return
+        const receipt = await rpcSingle(rpc, "eth_getTransactionReceipt", [hash])
+        if (receipt && typeof receipt === "object") {
+          found.set(hash, receipt)
+          return
+        }
       } catch {
         continue
       }
     }
   })
+  return found
+}
+
+export async function fetchReceiptGasMap(
+  rpcs: string[],
+  hashes: string[],
+  onProgress?: (progress: GasFillProgress) => void,
+): Promise<Map<string, ReceiptGas>> {
+  const raw = await fetchEthReceipts(rpcs, hashes, onProgress)
+  const out = new Map<string, ReceiptGas>()
+  for (const [hash, receipt] of raw) {
+    const gas = parseReceiptGas(receipt)
+    if (gas) out.set(hash, gas)
+  }
   return out
 }
 
 /**
  * Repair empty / non-canonical gas fields on a loaded tape.
- * Fetches receipts only for trades missing price or fee wei.
+ * Fetches receipts only for trades missing price or fee wei, with retries.
  */
 export async function repairTradeGas(
   trades: Trade[],
   rpcs: string[] | null,
-): Promise<{ trades: Trade[]; changed: boolean; fetched: number }> {
+  onProgress?: (progress: GasFillProgress) => void,
+): Promise<{ trades: Trade[]; changed: boolean; fetched: number; missing: number }> {
   const formatted = normalizeTradeGasFormats(trades)
   let next = formatted.trades
   let changed = formatted.changed
   let fetched = 0
 
-  const missing = next.filter(tradeNeedsGasFetch)
-  if (rpcs && rpcs.length > 0 && missing.length > 0) {
-    const map = await fetchReceiptGasMap(
-      rpcs,
-      missing.map((trade) => trade.txHash),
-    )
+  const missingHashes = [
+    ...new Set(next.filter(tradeNeedsGasFetch).map((trade) => trade.txHash.toLowerCase())),
+  ]
+  if (rpcs && rpcs.length > 0 && missingHashes.length > 0) {
+    const map = await fetchReceiptGasMap(rpcs, missingHashes, onProgress)
     fetched = map.size
     if (map.size > 0) {
-      next = applyGasFees(next, map)
+      next = mergeGasFees(next, map)
       changed = true
     }
   }
@@ -224,8 +316,21 @@ export async function repairTradeGas(
   if (changed || next.some((trade) => trade.gasFeeWei && !trade.gasFeeTotalEth)) {
     next = assignGasFeeTotals(next)
     changed = true
+  } else if (next.length > 0) {
+    // Multi-page loads stamp per-page totals — always recompute across the full tape.
+    const recomputed = assignGasFeeTotals(next)
+    if (recomputed.some((trade, index) => trade.gasFeeTotalEth !== next[index]?.gasFeeTotalEth)) {
+      next = recomputed
+      changed = true
+    }
   }
 
   const polished = normalizeTradeGasFormats(next)
-  return { trades: polished.trades, changed: changed || polished.changed, fetched }
+  const missing = countMissingGas(polished.trades)
+  return {
+    trades: polished.trades,
+    changed: changed || polished.changed,
+    fetched,
+    missing,
+  }
 }

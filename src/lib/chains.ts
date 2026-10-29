@@ -40,8 +40,11 @@ export const CHAINS: ChainConfig[] = [
     gecko: "eth",
     llama: "ethereum",
     rpcs: [
+      // Distinct hostnames so the browser can open more concurrent connections.
       "https://ethereum.publicnode.com",
+      "https://ethereum-rpc.publicnode.com",
       "https://rpc.mevblocker.io",
+      "https://1rpc.io/eth",
       "https://eth.merkle.io",
     ],
     blockscout: "https://eth.blockscout.com",

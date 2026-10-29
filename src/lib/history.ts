@@ -2,7 +2,7 @@ import { decodeBase64Url, encodeBase64Url } from "./bytes"
 import { chainCanExport, type ChainConfig } from "./chains"
 import { amountsFromV4Receipt, decodeSwap, liquidityTopics, topicOrder } from "./decode"
 import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
-import { applyGasFees, parseReceiptGas, type ReceiptGas } from "./gas-fees"
+import { applyGasFees, fetchEthReceipts, parseReceiptGas, type ReceiptGas } from "./gas-fees"
 import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
 import { resolvePool } from "./pool"
@@ -419,27 +419,12 @@ type LoadedReceipt = {
 async function loadReceipts(chain: ChainConfig, hashes: string[]): Promise<Map<string, LoadedReceipt>> {
   const receipts = new Map<string, LoadedReceipt>()
   if (hashes.length === 0 || chain.rpcs.length === 0) return receipts
-  const batches: string[][] = []
-  for (let index = 0; index < hashes.length; index += 20) batches.push(hashes.slice(index, index + 20))
-  await mapPool(batches, 4, async (batch) => {
-    for (const rpc of chain.rpcs) {
-      try {
-        const results = await rpcBatch(
-          rpc,
-          batch.map((hash) => ({ method: "eth_getTransactionReceipt", params: [hash] })),
-        )
-        results.forEach((receipt, id) => {
-          const hash = batch[id]
-          if (!hash || !receipt || typeof receipt !== "object") return
-          const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] }).logs
-          receipts.set(hash, { raw: receipt, logs: Array.isArray(logs) ? logs : [] })
-        })
-        if (batch.every((hash) => receipts.has(hash))) return
-      } catch {
-        continue
-      }
-    }
-  })
+  const raw = await fetchEthReceipts(chain.rpcs, hashes)
+  for (const [hash, receipt] of raw) {
+    if (!receipt || typeof receipt !== "object") continue
+    const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] }).logs
+    receipts.set(hash, { raw: receipt, logs: Array.isArray(logs) ? logs : [] })
+  }
   return receipts
 }
 

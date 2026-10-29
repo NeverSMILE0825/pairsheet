@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getChain } from "@/lib/chains"
-import { repairTradeGas, tradesNeedGasRepair } from "@/lib/gas-fees"
+import { assignGasFeeTotals, countMissingGas, repairTradeGas, tradesNeedGasRepair } from "@/lib/gas-fees"
 import {
   DA_COLUMN_DEFS,
   TX_COLUMN_DEFS,
@@ -535,16 +535,43 @@ export function Exporter() {
           cursor = null
         }
       } while (cursor)
+
+      let finalTrades = assignGasFeeTotals(loaded)
+      const chain = getChain(chainId)
+      if (chain && chain.id !== "solana" && countMissingGas(finalTrades) > 0) {
+        setProgress(
+          `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactions…`,
+        )
+        const result = await repairTradeGas(finalTrades, chain.rpcs, (progress) => {
+          if (run.current !== token) return
+          setProgress(
+            `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+          )
+        })
+        if (run.current !== token) return
+        finalTrades = result.trades
+        if (result.missing > 0) {
+          flashNotice(
+            `Loaded gas for ${(result.fetched).toLocaleString("en-US")} txs; ${result.missing.toLocaleString("en-US")} still missing after retries. Re-open the saved tape or reload to retry those.`,
+            "info",
+          )
+        }
+      } else {
+        finalTrades = assignGasFeeTotals(finalTrades)
+      }
+      if (run.current !== token) return
+      setTrades(finalTrades)
       setPhase("done")
+      setProgress("")
       if (poolView) {
-        void lookUpWalletFacts(chainId, poolView, loaded, token)
-        void lookUpHolders(chainId, poolView, loaded, token)
+        void lookUpWalletFacts(chainId, poolView, finalTrades, token)
+        void lookUpHolders(chainId, poolView, finalTrades, token)
       }
       void lookUpFunders(
         chainId,
-        loaded.map((trade) => trade.maker),
+        finalTrades.map((trade) => trade.maker),
         token,
-        loaded,
+        finalTrades,
       )
     } catch (loadError) {
       if (run.current !== token) return
@@ -983,22 +1010,36 @@ export function Exporter() {
         setCapped(saved.capped)
         let trades = saved.trades
         let repaired = false
+        let stillMissing = 0
         if (tradesNeedGasRepair(trades)) {
-          setProgress("Refreshing gas fees for this saved tape…")
+          const need = countMissingGas(trades)
+          setProgress(
+            need > 0
+              ? `Refreshing gas fees for ${need.toLocaleString("en-US")} transactions…`
+              : "Refreshing gas fee formatting…",
+          )
           const chain = getChain(saved.pool.chainId)
           const rpcs = chain && chain.id !== "solana" ? chain.rpcs : null
-          const result = await repairTradeGas(trades, rpcs)
+          const result = await repairTradeGas(trades, rpcs, (progress) => {
+            if (run.current !== token) return
+            setProgress(
+              `Refreshing gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+            )
+          })
           if (run.current !== token) return
           trades = result.trades
           repaired = result.changed
+          stillMissing = result.missing
         }
         setTrades(trades)
         setPhase("done")
         setProgress("")
         if (repaired) {
           flashNotice(
-            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and refreshed gas fee columns.`,
-            "info",
+            stillMissing > 0
+              ? `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}; refreshed gas but ${stillMissing.toLocaleString("en-US")} txs still lack receipts.`
+              : `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and refreshed gas fee columns.`,
+            stillMissing > 0 ? "info" : "ok",
           )
           setGasSavePrompt(true)
         } else {
