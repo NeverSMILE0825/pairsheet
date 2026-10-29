@@ -108,12 +108,15 @@ export async function saveAnalysis(input: {
   facts: WalletFacts
   warning: string | null
   capped: boolean
+  /** Preserve original time when importing a vault. */
+  savedAt?: string
+  starred?: boolean
 }): Promise<SavedAnalysisMeta> {
   if (typeof indexedDB === "undefined") {
     throw new Error("Saved analyses need a browser with IndexedDB.")
   }
   const id = analysisId(input.pool)
-  const savedAt = new Date().toISOString()
+  const savedAt = input.savedAt && Number.isFinite(Date.parse(input.savedAt)) ? input.savedAt : new Date().toISOString()
   const db = await openDb()
   try {
     const readTx = db.transaction(META_STORE, "readonly")
@@ -132,7 +135,7 @@ export async function saveAnalysis(input: {
       baseSymbol: input.pool.baseSymbol,
       quoteSymbol: input.pool.quoteSymbol,
       tradeCount: input.trades.length,
-      starred: Boolean(existing?.starred),
+      starred: input.starred !== undefined ? Boolean(input.starred) : Boolean(existing?.starred),
     }
     const payload: SavedAnalysisPayload = {
       id,
@@ -195,4 +198,74 @@ export function formatSavedAt(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+export type SavedVault = {
+  version: 1
+  exportedAt: string
+  bookmarks: SavedAnalysisMeta[]
+  payloads: SavedAnalysisPayload[]
+}
+
+export async function exportSavedVault(): Promise<SavedVault> {
+  const bookmarks = await listSavedAnalyses()
+  const payloads: SavedAnalysisPayload[] = []
+  for (const item of bookmarks) {
+    const payload = await loadSavedAnalysis(item.id)
+    if (payload) payloads.push(payload)
+  }
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    bookmarks,
+    payloads,
+  }
+}
+
+export async function importSavedVault(vault: SavedVault): Promise<number> {
+  if (!vault || vault.version !== 1 || !Array.isArray(vault.payloads)) {
+    throw new Error("That file is not a Pair Sheet saved-pairs export.")
+  }
+  if (typeof indexedDB === "undefined") {
+    throw new Error("Saved analyses need a browser with IndexedDB.")
+  }
+  let imported = 0
+  for (const payload of vault.payloads) {
+    if (!payload?.id || !payload.pool || !Array.isArray(payload.trades)) continue
+    const metaFromVault = vault.bookmarks.find((row) => row.id === payload.id)
+    await saveAnalysis({
+      url: payload.url,
+      pool: payload.pool,
+      trades: payload.trades,
+      facts: payload.facts,
+      warning: payload.warning,
+      capped: payload.capped,
+      savedAt: payload.savedAt || metaFromVault?.savedAt,
+      starred: Boolean(metaFromVault?.starred),
+    })
+    imported += 1
+  }
+  return imported
+}
+
+/** Merge local IndexedDB metas with cloud bookmarks; newer savedAt wins, stars OR together. */
+export function mergeSavedMeta(local: SavedAnalysisMeta[], remote: SavedAnalysisMeta[]): SavedAnalysisMeta[] {
+  const map = new Map<string, SavedAnalysisMeta>()
+  for (const item of remote) map.set(item.id, { ...item })
+  for (const item of local) {
+    const prev = map.get(item.id)
+    if (!prev) {
+      map.set(item.id, { ...item })
+      continue
+    }
+    const newer = item.savedAt >= prev.savedAt ? item : prev
+    const older = newer === item ? prev : item
+    map.set(item.id, {
+      ...older,
+      ...newer,
+      starred: Boolean(item.starred || prev.starred),
+      tradeCount: Math.max(item.tradeCount, prev.tradeCount),
+    })
+  }
+  return [...map.values()].sort(compareSavedMeta)
 }

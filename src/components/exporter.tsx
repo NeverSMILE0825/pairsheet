@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
@@ -48,15 +48,27 @@ import {
   type MinuteRow,
 } from "@/lib/minute-tape"
 import {
+  fetchRemoteBookmarks,
+  getSyncToken,
+  hasSyncToken,
+  publishBookmarks,
+  setSyncToken,
+  syncTokenHelpUrl,
+} from "@/lib/bookmarks-sync"
+import {
   analysisId,
   compareSavedMeta,
   deleteSavedAnalysis,
+  exportSavedVault,
   formatSavedAt,
+  importSavedVault,
   listSavedAnalyses,
   loadSavedAnalysis,
+  mergeSavedMeta,
   saveAnalysis,
   setAnalysisStarred,
   type SavedAnalysisMeta,
+  type SavedVault,
 } from "@/lib/saved-analyses"
 import {
   AUTO_ZONE,
@@ -205,11 +217,19 @@ export function Exporter() {
   const [toNo, setToNo] = useState("")
   const [noError, setNoError] = useState<string | null>(null)
   const [savedList, setSavedList] = useState<SavedAnalysisMeta[]>([])
+  const [localSavedIds, setLocalSavedIds] = useState<Set<string>>(() => new Set())
   const [saveBusy, setSaveBusy] = useState(false)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [syncTokenDraft, setSyncTokenDraft] = useState("")
+  const [syncEnabled, setSyncEnabled] = useState(false)
+  const [showSyncSetup, setShowSyncSetup] = useState(false)
+  const importFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
+    setSyncEnabled(hasSyncToken())
+    setSyncTokenDraft(getSyncToken())
     void refreshSavedList()
   }, [])
 
@@ -224,10 +244,22 @@ export function Exporter() {
 
   async function refreshSavedList() {
     try {
-      setSavedList(await listSavedAnalyses())
+      const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
+      setLocalSavedIds(new Set(local.map((item) => item.id)))
+      const remote = await fetchRemoteBookmarks()
+      setSavedList(mergeSavedMeta(local, remote.bookmarks))
     } catch {
-      // IndexedDB may be unavailable in private mode; keep the live load path working.
+      // IndexedDB / network may be unavailable; keep the live load path working.
     }
+  }
+
+  async function publishMergedBookmarks(nextLocal?: SavedAnalysisMeta[]) {
+    if (!hasSyncToken()) return
+    const local = nextLocal ?? (await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[]))
+    const remote = await fetchRemoteBookmarks()
+    const merged = mergeSavedMeta(local, remote.bookmarks)
+    await publishBookmarks(merged)
+    setSavedList(merged)
   }
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
@@ -796,8 +828,17 @@ export function Exporter() {
         warning,
         capped,
       })
-      await refreshSavedList()
-      setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol}. Use Open to reopen it anytime.`)
+      const local = await listSavedAnalyses()
+      setLocalSavedIds(new Set(local.map((item) => item.id)))
+      if (hasSyncToken()) {
+        await publishMergedBookmarks(local)
+        setSaveNotice(`Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced to every browser.`)
+      } else {
+        await refreshSavedList()
+        setSaveNotice(
+          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open → Enable sync (or Export) to use it on Edge / other PCs.`,
+        )
+      }
     } catch (saveError) {
       setSaveNotice(saveError instanceof Error ? saveError.message : "Could not save this analysis.")
     } finally {
@@ -807,22 +848,29 @@ export function Exporter() {
 
   async function openSaved(id: string) {
     setSavedOpen(false)
+    const meta = savedList.find((item) => item.id === id)
     run.current += 1
     setPhase("loading")
     resetViewState()
     setProgress("Opening saved analysis…")
     try {
       const saved = await loadSavedAnalysis(id)
-      if (!saved) throw new Error("That saved analysis is no longer available.")
-      setUrl(saved.url)
-      setPool(saved.pool)
-      setTrades(saved.trades)
-      setFacts(saved.facts)
-      setWarning(saved.warning)
-      setCapped(saved.capped)
-      setPhase("done")
-      setProgress("")
-      setSaveNotice(`Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`)
+      if (saved) {
+        setUrl(saved.url)
+        setPool(saved.pool)
+        setTrades(saved.trades)
+        setFacts(saved.facts)
+        setWarning(saved.warning)
+        setCapped(saved.capped)
+        setPhase("done")
+        setProgress("")
+        setSaveNotice(`Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`)
+        return
+      }
+      if (!meta?.url) throw new Error("That saved analysis is no longer available.")
+      setUrl(meta.url)
+      setSaveNotice(`Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)…`)
+      await load(meta.url)
     } catch (openError) {
       setPhase("error")
       setError(openError instanceof Error ? openError.message : "Could not open saved analysis.")
@@ -831,10 +879,23 @@ export function Exporter() {
 
   async function removeSaved(id: string) {
     try {
+      const wasLocal = localSavedIds.has(id)
       await deleteSavedAnalysis(id)
+      const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
+      setLocalSavedIds(new Set(local.map((item) => item.id)))
+      if (hasSyncToken()) {
+        const remote = await fetchRemoteBookmarks()
+        const merged = mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id)
+        await publishBookmarks(merged)
+        setSavedList(merged)
+        setSaveNotice("Removed this pair from this browser and the shared list.")
+        return
+      }
       await refreshSavedList()
-      if (pool && analysisId(pool) === id) {
-        setSaveNotice("Removed this pair from saved pairs.")
+      if (!wasLocal) {
+        setSaveNotice("That pair is on the shared list. Enable sync to remove it for every browser.")
+      } else {
+        setSaveNotice("Removed the local snapshot on this browser.")
       }
     } catch {
       setSaveNotice("Could not delete that saved analysis.")
@@ -847,10 +908,90 @@ export function Exporter() {
       [...current.map((row) => (row.id === item.id ? { ...row, starred: next } : row))].sort(compareSavedMeta),
     )
     try {
-      await setAnalysisStarred(item.id, next)
-      await refreshSavedList()
+      if (localSavedIds.has(item.id)) await setAnalysisStarred(item.id, next)
+      if (hasSyncToken()) {
+        const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
+        const remote = await fetchRemoteBookmarks()
+        const merged = mergeSavedMeta(local, remote.bookmarks).map((row) =>
+          row.id === item.id ? { ...row, starred: next } : row,
+        )
+        await publishBookmarks(merged)
+        setSavedList(merged.sort(compareSavedMeta))
+      } else {
+        await refreshSavedList()
+      }
     } catch {
       await refreshSavedList()
+    }
+  }
+
+  async function downloadVault() {
+    try {
+      const vault = await exportSavedVault()
+      const blob = new Blob([`${JSON.stringify(vault)}\n`], { type: "application/json" })
+      const href = URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = href
+      anchor.download = `pairsheet-saved-pairs-${new Date().toISOString().slice(0, 10)}.json`
+      anchor.click()
+      URL.revokeObjectURL(href)
+      setSaveNotice(`Exported ${vault.payloads.length.toLocaleString("en-US")} saved pair${vault.payloads.length === 1 ? "" : "s"}.`)
+    } catch (error) {
+      setSaveNotice(error instanceof Error ? error.message : "Could not export saved pairs.")
+    }
+  }
+
+  async function onImportVault(file: File | null) {
+    if (!file) return
+    try {
+      const text = await file.text()
+      const vault = JSON.parse(text) as SavedVault
+      const count = await importSavedVault(vault)
+      const local = await listSavedAnalyses()
+      setLocalSavedIds(new Set(local.map((item) => item.id)))
+      if (hasSyncToken()) await publishMergedBookmarks(local)
+      else await refreshSavedList()
+      setSaveNotice(`Imported ${count.toLocaleString("en-US")} saved pair${count === 1 ? "" : "s"} into this browser.`)
+    } catch (error) {
+      setSaveNotice(error instanceof Error ? error.message : "Could not import that file.")
+    } finally {
+      if (importFileRef.current) importFileRef.current.value = ""
+    }
+  }
+
+  async function saveSyncToken() {
+    setSyncToken(syncTokenDraft)
+    const enabled = hasSyncToken()
+    setSyncEnabled(enabled)
+    if (!enabled) {
+      setSaveNotice("Cloud sync turned off. Saved pairs stay on this browser only.")
+      return
+    }
+    setSyncBusy(true)
+    try {
+      await publishMergedBookmarks()
+      setShowSyncSetup(false)
+      setSaveNotice("Cloud sync on. Saved pairs now show in Edge and on other PCs.")
+    } catch (error) {
+      setSaveNotice(error instanceof Error ? error.message : "Could not publish bookmarks.")
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
+  async function publishNow() {
+    if (!hasSyncToken()) {
+      setShowSyncSetup(true)
+      return
+    }
+    setSyncBusy(true)
+    try {
+      await publishMergedBookmarks()
+      setSaveNotice("Published local saved pairs to the shared list.")
+    } catch (error) {
+      setSaveNotice(error instanceof Error ? error.message : "Could not publish bookmarks.")
+    } finally {
+      setSyncBusy(false)
     }
   }
 
@@ -934,7 +1075,7 @@ export function Exporter() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="saved-pairs-title"
-            className="flex max-h-[min(32rem,85vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-foreground/10"
+            className="flex max-h-[min(40rem,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-foreground/10"
           >
             <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
               <div>
@@ -942,73 +1083,152 @@ export function Exporter() {
                   Saved pairs
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Stored in this browser. Star a pair to keep it at the top.
+                  {syncEnabled
+                    ? "Synced across browsers via GitHub. Star a pair to pin it."
+                    : "This browser keeps full snapshots. Enable sync or Export so Edge / other PCs can see them."}
                 </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close saved pairs" onClick={() => setSavedOpen(false)}>
                 <X className="size-4" />
               </Button>
             </div>
+
+            <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => void downloadVault()} disabled={localSavedIds.size === 0}>
+                <Download className="size-3.5" />
+                Export
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => importFileRef.current?.click()}>
+                <Upload className="size-3.5" />
+                Import
+              </Button>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => void onImportVault(event.target.files?.[0] ?? null)}
+              />
+              <Button type="button" size="sm" variant="outline" onClick={() => setShowSyncSetup((value) => !value)}>
+                <Cloud className="size-3.5" />
+                {syncEnabled ? "Sync on" : "Enable sync"}
+              </Button>
+              {syncEnabled ? (
+                <Button type="button" size="sm" variant="ghost" disabled={syncBusy} onClick={() => void publishNow()}>
+                  {syncBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  Publish
+                </Button>
+              ) : null}
+            </div>
+
+            {showSyncSetup ? (
+              <div className="space-y-2 border-b border-border px-4 py-3 text-sm">
+                <p className="text-xs text-muted-foreground">
+                  Create a fine-grained GitHub PAT with Contents Read and Write on{" "}
+                  <span className="font-mono">NeverSMILE0825/pairsheet</span>, paste it once per browser, then Publish.
+                  Other browsers only need to open the site — the shared list loads automatically.
+                </p>
+                <a className="text-xs text-primary hover:underline" href={syncTokenHelpUrl()} target="_blank" rel="noreferrer">
+                  Create fine-grained token
+                </a>
+                <Input
+                  type="password"
+                  value={syncTokenDraft}
+                  onChange={(event) => setSyncTokenDraft(event.target.value)}
+                  placeholder="github_pat_…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="h-9 font-mono text-xs"
+                  aria-label="GitHub sync token"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" disabled={syncBusy || syncTokenDraft.trim() === ""} onClick={() => void saveSyncToken()}>
+                    {syncBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    Save token &amp; publish
+                  </Button>
+                  {syncEnabled ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setSyncTokenDraft("")
+                        setSyncToken("")
+                        setSyncEnabled(false)
+                        setSaveNotice("Cloud sync turned off on this browser.")
+                      }}
+                    >
+                      Disconnect
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {savedList.length === 0 ? (
                 <p className="px-2 py-10 text-center text-sm text-muted-foreground">
-                  No saved pairs yet. Load a tape, then use Save analysis.
+                  No saved pairs yet. Load a tape, then use Save analysis — or Import a backup from another browser.
                 </p>
               ) : (
                 <ul className="flex flex-col gap-2">
-                  {savedList.map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex flex-col gap-2 rounded-xl bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="flex min-w-0 items-start gap-2">
-                        <button
-                          type="button"
-                          className={`mt-0.5 shrink-0 rounded-md p-1 ${
-                            item.starred ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground hover:text-foreground"
-                          }`}
-                          aria-label={
-                            item.starred
-                              ? `Unstar ${item.baseSymbol} / ${item.quoteSymbol}`
-                              : `Star ${item.baseSymbol} / ${item.quoteSymbol}`
-                          }
-                          aria-pressed={Boolean(item.starred)}
-                          onClick={() => void toggleStar(item)}
-                        >
-                          <Star className={`size-4 ${item.starred ? "fill-current" : ""}`} />
-                        </button>
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">
-                            {item.baseSymbol} / {item.quoteSymbol}
-                            <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
-                          </p>
+                  {savedList.map((item) => {
+                    const local = localSavedIds.has(item.id)
+                    return (
+                      <li
+                        key={item.id}
+                        className="flex flex-col gap-2 rounded-xl bg-muted/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="flex min-w-0 items-start gap-2">
+                          <button
+                            type="button"
+                            className={`mt-0.5 shrink-0 rounded-md p-1 ${
+                              item.starred ? "text-amber-400 hover:text-amber-300" : "text-muted-foreground hover:text-foreground"
+                            }`}
+                            aria-label={
+                              item.starred
+                                ? `Unstar ${item.baseSymbol} / ${item.quoteSymbol}`
+                                : `Star ${item.baseSymbol} / ${item.quoteSymbol}`
+                            }
+                            aria-pressed={Boolean(item.starred)}
+                            onClick={() => void toggleStar(item)}
+                          >
+                            <Star className={`size-4 ${item.starred ? "fill-current" : ""}`} />
+                          </button>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">
+                              {item.baseSymbol} / {item.quoteSymbol}
+                              <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
+                              {local ? " · this browser" : " · shared list"}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex shrink-0 gap-2 pl-8 sm:pl-0">
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={phase === "loading"}
-                          onClick={() => void openSaved(item.id)}
-                        >
-                          Open
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
-                          disabled={phase === "loading"}
-                          onClick={() => void removeSaved(item.id)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
+                        <div className="flex shrink-0 gap-2 pl-8 sm:pl-0">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={phase === "loading"}
+                            onClick={() => void openSaved(item.id)}
+                          >
+                            Open
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
+                            disabled={phase === "loading"}
+                            onClick={() => void removeSaved(item.id)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
