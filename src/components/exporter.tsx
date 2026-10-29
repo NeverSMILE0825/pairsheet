@@ -54,7 +54,7 @@ const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
 
 type Phase = "idle" | "loading" | "done" | "error"
-type SideFilter = "ALL" | "BUY" | "SELL" | "ADD" | "REMOVE"
+type SideFilter = "ALL" | "BUY" | "SELL" | "ADD" | "REMOVE" | "INIT"
 
 const FILTER_LABELS: Record<SideFilter, string> = {
   ALL: "All",
@@ -62,6 +62,7 @@ const FILTER_LABELS: Record<SideFilter, string> = {
   SELL: "Sells",
   ADD: "Adds",
   REMOVE: "Removes",
+  INIT: "Init",
 }
 type SortKey =
   | "txNo"
@@ -1271,6 +1272,7 @@ const TYPE_TONE: Record<Trade["type"], string> = {
   SELL: "text-rose-400",
   ADD: "text-sky-400",
   REMOVE: "text-amber-400",
+  INIT: "text-foreground",
 }
 
 function summarize(trades: Trade[]) {
@@ -1280,7 +1282,7 @@ function summarize(trades: Trade[]) {
   let removes = 0
   let volume = 0
   for (const trade of trades) {
-    if (trade.type === "ADD") {
+    if (trade.type === "ADD" || trade.type === "INIT") {
       adds += 1
       continue
     }

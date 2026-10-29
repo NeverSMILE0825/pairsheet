@@ -1,6 +1,6 @@
 import { decodeBase64Url, encodeBase64Url } from "./bytes"
 import { chainCanExport, type ChainConfig } from "./chains"
-import { decodeSwap, liquidityTopics, topicOrder } from "./decode"
+import { amountsFromV4Receipt, decodeSwap, liquidityTopics, topicOrder } from "./decode"
 import { formatUnits, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
 import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
@@ -322,7 +322,18 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
   })
   if (decoded.length === 0) return []
 
-  const [makers, prices, sizes] = await Promise.all([
+  const liquidityHashes =
+    pool.style === "v4"
+      ? [
+          ...new Set(
+            decoded
+              .filter((row) => row.swap.type === "ADD" || row.swap.type === "REMOVE")
+              .map((row) => row.log.txHash.toLowerCase()),
+          ),
+        ]
+      : []
+
+  const [makers, prices, sizes, liquidityReceipts] = await Promise.all([
     resolveMakers(
       chain,
       decoded.map((row) => row.log.txHash),
@@ -339,28 +350,37 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       pool,
       decoded.map((row) => row.log),
     ).catch(() => new Map<string, PoolSize>()),
+    loadReceiptLogs(chain, liquidityHashes),
   ])
 
   const trades = decoded.map(({ log, swap }) => {
+    const receiptLogs = liquidityReceipts.get(log.txHash.toLowerCase())
+    const filled =
+      (swap.type === "ADD" || swap.type === "REMOVE") && receiptLogs
+        ? { ...swap, ...amountsFromV4Receipt(pool, swap.type, receiptLogs) }
+        : swap
     const quotePrice = prices.get(log.timestamp) ?? null
     const size = sizes.get(`${log.txHash.toLowerCase()}-${log.logIndex}`)
-    const baseAmount = formatUnits(swap.baseRaw, pool.base.decimals)
-    const quoteAmount = formatUnits(swap.quoteRaw, pool.quote.decimals)
+    const baseAmount = formatUnits(filled.baseRaw, pool.base.decimals)
+    const quoteAmount = formatUnits(filled.quoteRaw, pool.quote.decimals)
     const priceQuote = priceInQuote(
-      swap.quoteRaw,
+      filled.quoteRaw,
       pool.quote.decimals,
-      swap.baseRaw,
+      filled.baseRaw,
       pool.base.decimals,
     )
-    const oneSided = swap.baseRaw === 0n || swap.quoteRaw === 0n
-    const usd = quotePrice === null ? null : totalUsd(swap.quoteRaw, pool.quote.decimals, quotePrice)
+    const oneSided = filled.baseRaw === 0n || filled.quoteRaw === 0n || filled.type === "INIT"
+    const usd =
+      quotePrice === null || filled.type === "INIT"
+        ? null
+        : totalUsd(filled.quoteRaw, pool.quote.decimals, quotePrice)
     const trade: Trade = {
       id: `${log.txHash}-${log.logIndex}`,
       txNo: 0,
       timestamp: new Date(log.timestamp * 1000).toISOString(),
       blockNumber: log.blockNumber,
       logIndex: log.logIndex,
-      type: swap.type,
+      type: filled.type,
       priceQuote: oneSided ? null : priceQuote,
       baseAmount,
       quoteAmount,
@@ -385,6 +405,36 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
     return b.logIndex - a.logIndex
   })
   return trades
+}
+
+async function loadReceiptLogs(
+  chain: ChainConfig,
+  hashes: string[],
+): Promise<Map<string, { address?: string; topics?: string[]; data?: string }[]>> {
+  const receipts = new Map<string, { address?: string; topics?: string[]; data?: string }[]>()
+  if (hashes.length === 0 || chain.rpcs.length === 0) return receipts
+  const batches: string[][] = []
+  for (let index = 0; index < hashes.length; index += 20) batches.push(hashes.slice(index, index + 20))
+  await mapPool(batches, 4, async (batch) => {
+    for (const rpc of chain.rpcs) {
+      try {
+        const results = await rpcBatch(
+          rpc,
+          batch.map((hash) => ({ method: "eth_getTransactionReceipt", params: [hash] })),
+        )
+        results.forEach((receipt, id) => {
+          const hash = batch[id]
+          const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] } | undefined)?.logs
+          if (!hash || !Array.isArray(logs)) return
+          receipts.set(hash, logs)
+        })
+        if (batch.every((hash) => receipts.has(hash))) return
+      } catch {
+        continue
+      }
+    }
+  })
+  return receipts
 }
 
 type TxParties = { from: string; to: string }

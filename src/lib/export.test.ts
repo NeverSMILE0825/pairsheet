@@ -5,6 +5,8 @@ import {
   BURN_V3_TOPIC,
   MINT_V2_TOPIC,
   SWAP_V2_TOPIC,
+  INIT_V4_TOPIC,
+  MODIFY_LIQUIDITY_V4_TOPIC,
   SWAP_V4_TOPIC,
   decodeAbiString,
   decodeSwap,
@@ -193,7 +195,7 @@ test("decodes a solana pool swap from token balance deltas", () => {
   assert.equal(trade.maker, "Maker1111111111111111111111111111111111111")
 })
 
-test("decodes a uniswap v4 swap with the same amount layout as v3", () => {
+test("decodes uniswap v4 swaps with caller BalanceDelta signs (opposite of v3)", () => {
   const poolId = "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96"
   const v4Pool: PoolContext = {
     ...pool,
@@ -203,23 +205,55 @@ test("decodes a uniswap v4 swap with the same amount layout as v3", () => {
     style: "v4",
     dex: "Uniswap V4 (Ethereum)",
     dexId: "uniswap-v4-ethereum",
+    // GINNAN/ETH style: token0 = quote (ETH), token1 = base
+    token0: pool.quote.address,
+    token1: pool.base.address,
   }
   assert.deepEqual(topicOrder(v4Pool.dexId, v4Pool.dex, v4Pool.style), [SWAP_V4_TOPIC])
-  assert.deepEqual(liquidityTopics(SWAP_V4_TOPIC), [])
-  const data = `0x${encodeInt(-2_000000000000000000n)}${encodeInt(1_500000000000000000n)}${"0".repeat(64 * 4)}`
-  const log = {
-    data,
-    topics: [SWAP_V4_TOPIC, poolId, "0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af"],
-    blockNumber: 1,
-    timestamp: 1,
-    txHash: "0xabc",
-    logIndex: 1,
-  }
-  const swap = decodeSwap(log, v4Pool)
-  assert.ok(swap)
-  assert.equal(swap.type, "BUY")
-  assert.equal(swap.baseRaw, 2_000000000000000000n)
-  assert.equal(swap.quoteRaw, 1_500000000000000000n)
+  assert.deepEqual(liquidityTopics(SWAP_V4_TOPIC).length, 2)
+  // amount0=-0.046 ETH (caller paid), amount1=+44.3M base (caller received) => BUY
+  const buyData = `0x${encodeInt(-46_429_240_000_000_000n)}${encodeInt(44_356_409_389_851_241_404_368_592n)}${"0".repeat(64 * 4)}`
+  const buy = decodeSwap(
+    {
+      data: buyData,
+      topics: [SWAP_V4_TOPIC, poolId, "0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af"],
+      blockNumber: 1,
+      timestamp: 1,
+      txHash: "0xabc",
+      logIndex: 1,
+    },
+    v4Pool,
+  )
+  assert.ok(buy)
+  assert.equal(buy.type, "BUY")
+  assert.equal(buy.baseRaw, 44_356_409_389_851_241_404_368_592n)
+  assert.equal(buy.quoteRaw, 46_429_240_000_000_000n)
+
+  const init = decodeSwap(
+    {
+      data: `0x${"0".repeat(64 * 5)}`,
+      topics: [INIT_V4_TOPIC, poolId, "0x0000000000000000000000000000000000000000", "0x0000000000000000000000008fe342d1165465e7595e3fe61d08ce38341b0bd0"],
+      blockNumber: 1,
+      timestamp: 1,
+      txHash: "0xinit",
+      logIndex: 0,
+    },
+    v4Pool,
+  )
+  assert.deepEqual(init, { type: "INIT", baseRaw: 0n, quoteRaw: 0n })
+
+  const add = decodeSwap(
+    {
+      data: `0x${encodeInt(-887220n)}${encodeInt(207240n)}${encodeInt(1_000n)}${"0".repeat(64)}`,
+      topics: [MODIFY_LIQUIDITY_V4_TOPIC, poolId, "0x000000000000000000000000bd216513d74c8cf14cf4747e6aaa6420ff64ee9e"],
+      blockNumber: 1,
+      timestamp: 1,
+      txHash: "0xadd",
+      logIndex: 2,
+    },
+    v4Pool,
+  )
+  assert.deepEqual(add, { type: "ADD", baseRaw: 0n, quoteRaw: 0n })
 })
 
 test("decodes a token symbol from ABI data", () => {

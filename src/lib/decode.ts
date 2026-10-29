@@ -8,6 +8,12 @@ export const SWAP_V3_TOPIC =
 /** Uniswap V4 PoolManager: Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24) */
 export const SWAP_V4_TOPIC =
   "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
+/** Uniswap V4 PoolManager: Initialize(bytes32,address,address,uint24,int24,address,uint160,int24) */
+export const INIT_V4_TOPIC =
+  "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
+/** Uniswap V4 PoolManager: ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32) */
+export const MODIFY_LIQUIDITY_V4_TOPIC =
+  "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
 
 export const MINT_V2_TOPIC =
   "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f"
@@ -18,6 +24,7 @@ export const MINT_V3_TOPIC =
 export const BURN_V3_TOPIC =
   "0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c"
 
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 const V2_FAMILY = [SWAP_V2_TOPIC, MINT_V2_TOPIC, BURN_V2_TOPIC]
 
 export function isV2Family(topic: string): boolean {
@@ -26,7 +33,7 @@ export function isV2Family(topic: string): boolean {
 
 export function liquidityTopics(swapTopic: string): string[] {
   const topic = swapTopic.toLowerCase()
-  if (topic === SWAP_V4_TOPIC) return []
+  if (topic === SWAP_V4_TOPIC) return [INIT_V4_TOPIC, MODIFY_LIQUIDITY_V4_TOPIC]
   return topic === SWAP_V3_TOPIC ? [MINT_V3_TOPIC, BURN_V3_TOPIC] : [MINT_V2_TOPIC, BURN_V2_TOPIC]
 }
 
@@ -72,7 +79,15 @@ export function decodeSwap(log: RawLog, pool: PoolContext): DecodedSwap | null {
   if (topic === SWAP_V3_TOPIC) return decodeV3(log.data, pool)
   if (topic === SWAP_V4_TOPIC) {
     if (pool.topic1 && (log.topics[1] || "").toLowerCase() !== pool.topic1.toLowerCase()) return null
-    return decodeV3(log.data, pool)
+    return decodeV4(log.data, pool)
+  }
+  if (topic === INIT_V4_TOPIC) {
+    if (pool.topic1 && (log.topics[1] || "").toLowerCase() !== pool.topic1.toLowerCase()) return null
+    return { type: "INIT", baseRaw: 0n, quoteRaw: 0n }
+  }
+  if (topic === MODIFY_LIQUIDITY_V4_TOPIC) {
+    if (pool.topic1 && (log.topics[1] || "").toLowerCase() !== pool.topic1.toLowerCase()) return null
+    return decodeV4ModifyLiquidity(log.data)
   }
   if (topic === MINT_V2_TOPIC) return decodeLiquidity(log.data, pool, 0, "ADD")
   if (topic === BURN_V2_TOPIC) return decodeLiquidity(log.data, pool, 0, "REMOVE")
@@ -95,6 +110,18 @@ function decodeLiquidity(
     type,
     baseRaw: baseIs0 ? amount0 : amount1,
     quoteRaw: baseIs0 ? amount1 : amount0,
+  }
+}
+
+function decodeV4ModifyLiquidity(data: string): DecodedSwap | null {
+  // data: tickLower, tickUpper, liquidityDelta, salt
+  const liquidityDelta = decodeInt256(data, 2)
+  if (liquidityDelta === 0n) return null
+  return {
+    type: liquidityDelta > 0n ? "ADD" : "REMOVE",
+    // Token amounts are filled from the tx receipt (ModifyLiquidity has no amounts).
+    baseRaw: 0n,
+    quoteRaw: 0n,
   }
 }
 
@@ -124,6 +151,25 @@ function flows(data: string, pool: PoolContext, v3: boolean) {
   }
 }
 
+/**
+ * V4 Swap amounts are BalanceDelta for the caller: positive = caller received
+ * that currency (tokens left the pool). That is the opposite of Uniswap V3's
+ * pool-delta convention.
+ */
+function flowsV4(data: string, pool: PoolContext) {
+  const baseIs0 = sameAddress(pool.token0, pool.base.address)
+  const amount0 = decodeInt256(data, 0)
+  const amount1 = decodeInt256(data, 1)
+  const baseDelta = baseIs0 ? amount0 : amount1
+  const quoteDelta = baseIs0 ? amount1 : amount0
+  return {
+    baseIn: baseDelta < 0n ? -baseDelta : 0n,
+    baseOut: baseDelta > 0n ? baseDelta : 0n,
+    quoteIn: quoteDelta < 0n ? -quoteDelta : 0n,
+    quoteOut: quoteDelta > 0n ? quoteDelta : 0n,
+  }
+}
+
 function classify(flow: {
   baseIn: bigint
   baseOut: bigint
@@ -147,6 +193,10 @@ export function decodeV3(data: string, pool: PoolContext): DecodedSwap | null {
   return classify(flows(data, pool, true))
 }
 
+export function decodeV4(data: string, pool: PoolContext): DecodedSwap | null {
+  return classify(flowsV4(data, pool))
+}
+
 export function decodeAbiString(hex: string): string {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex
   if (!clean || /^0+$/.test(clean)) return ""
@@ -158,4 +208,46 @@ export function decodeAbiString(hex: string): string {
   const length = Number(BigInt(`0x${clean.slice(start, start + 64)}`))
   const data = clean.slice(start + 64, start + 64 + length * 2)
   return hexToUtf8(data)
+}
+
+/** Sum ERC-20 transfers of base/quote to or from the V4 PoolManager in a receipt. */
+export function amountsFromV4Receipt(
+  pool: PoolContext,
+  type: "ADD" | "REMOVE",
+  receiptLogs: { address?: string; topics?: string[]; data?: string }[],
+): { baseRaw: bigint; quoteRaw: bigint } {
+  let baseRaw = 0n
+  let quoteRaw = 0n
+  const manager = pool.logAddress.toLowerCase()
+  const base = pool.base.address.toLowerCase()
+  const quote = pool.quote.address.toLowerCase()
+  const nativeQuote = sameAddress(pool.quote.address, "0x0000000000000000000000000000000000000000")
+  const nativeBase = sameAddress(pool.base.address, "0x0000000000000000000000000000000000000000")
+
+  for (const log of receiptLogs) {
+    if (!log.address || !Array.isArray(log.topics) || log.topics.length < 3 || typeof log.data !== "string") continue
+    if ((log.topics[0] || "").toLowerCase() !== TRANSFER_TOPIC) continue
+    const token = log.address.toLowerCase()
+    if (token !== base && token !== quote) continue
+    const from = `0x${log.topics[1].slice(-40).toLowerCase()}`
+    const to = `0x${log.topics[2].slice(-40).toLowerCase()}`
+    let amount = 0n
+    try {
+      amount = BigInt(log.data)
+    } catch {
+      continue
+    }
+    if (amount === 0n) continue
+    const intoManager = to === manager && from !== manager
+    const outOfManager = from === manager && to !== manager
+    const count = type === "ADD" ? intoManager : outOfManager
+    if (!count) continue
+    if (token === base) baseRaw += amount
+    if (token === quote) quoteRaw += amount
+  }
+
+  // Native currency has no ERC-20 Transfer; leave 0 (matches DEXTools for ETH-sided adds).
+  if (nativeBase) baseRaw = baseRaw
+  if (nativeQuote) quoteRaw = quoteRaw
+  return { baseRaw, quoteRaw }
 }

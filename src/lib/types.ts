@@ -1,6 +1,6 @@
 export type MakerTag = "bot" | "team"
 
-export type Side = "BUY" | "SELL" | "ADD" | "REMOVE"
+export type Side = "BUY" | "SELL" | "ADD" | "REMOVE" | "INIT"
 
 export type TokenInfo = {
   address: string
