@@ -43,7 +43,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "M. Cap is unit price × token supply when supply is known.",
       "Pool columns are the pool balances right after that event (hover for the exact value).",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded).",
-      "Gas Fee = that transaction’s effective gas price in gwei. Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
+      "Gas Fee = that transaction’s effective gas price in gwei (3 decimals). Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
       "Funded by is the address that first sent native currency into the maker.",
     ],
@@ -60,12 +60,13 @@ export const HELP_SECTIONS: HelpSection[] = [
   },
   {
     id: "intervals",
-    title: "Interval table & chart",
-    summary: "Group the tape into time buckets (1s → 1 day) like DEXTools.",
+    title: "Deep Analysis & chart",
+    summary: "Group the tape into time buckets (12s → 1 day) for counts, pool, holders, and gas.",
     bullets: [
-      "Buy Count / Sell Count and average speeds are per bucket.",
+      "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket.",
       "Start / End pool quote, mcap, price, and holders show how the bucket opened and closed.",
-      "Open the chart for Buy+Sell, candles/bars, min/max, and scroll/zoom like DEXTools.",
+      "Gas Fee / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
+      "Chart Y-axis includes Gas Fee and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",
     ],
     examples: [
       {

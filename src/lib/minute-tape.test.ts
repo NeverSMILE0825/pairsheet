@@ -204,3 +204,35 @@ test("carries start/end holder counts across minutes", () => {
   assert.equal(rows[2].startHolders, 15)
   assert.equal(rows[2].endHolders, 14)
 })
+
+test("carries gas fee and gas fee total across Deep Analysis buckets", () => {
+  const rows = buildMinuteTape(
+    [
+      trade({
+        type: "BUY",
+        timestamp: "2026-10-26T16:20:10.000Z",
+        id: "b1",
+        blockNumber: 1,
+        gasPriceGwei: "0.400",
+        gasFeeTotalEth: "0.0010",
+      }),
+      trade({
+        type: "SELL",
+        timestamp: "2026-10-26T16:22:10.000Z",
+        id: "s1",
+        blockNumber: 2,
+        gasPriceGwei: "0.500",
+        gasFeeTotalEth: "0.0025",
+      }),
+    ],
+    "UTC",
+  )
+  assert.equal(rows[0].startGasPriceGwei, null)
+  assert.equal(rows[0].endGasPriceGwei, "0.400")
+  assert.equal(rows[0].endGasFeeTotalEth, "0.0010")
+  assert.equal(rows[1].startGasPriceGwei, "0.400")
+  assert.equal(rows[1].endGasPriceGwei, "0.400")
+  assert.equal(rows[2].startGasPriceGwei, "0.400")
+  assert.equal(rows[2].endGasPriceGwei, "0.500")
+  assert.equal(rows[2].endGasFeeTotalEth, "0.0025")
+})

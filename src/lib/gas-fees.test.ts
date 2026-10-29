@@ -37,8 +37,9 @@ function trade(partial: Partial<Trade> & Pick<Trade, "id" | "txHash" | "blockNum
 }
 
 test("formats gwei and eth with fixed decimals", () => {
-  assert.equal(formatGasPriceGwei(12_500_000_000n), "12.5")
+  assert.equal(formatGasPriceGwei(12_500_000_000n), "12.500")
   assert.equal(formatGasPriceGwei(276_000_000n), "0.276")
+  assert.equal(formatGasPriceGwei(413_400_000n), "0.413")
   assert.equal(formatEth4(250_000_000_000_000n), "0.0003")
   assert.equal(formatEth4(1_000_000_000_000_000n), "0.0010")
 })
@@ -67,8 +68,8 @@ test("cumulative gas totals count each tx hash once", () => {
     gasByTx,
   )
   const byId = Object.fromEntries(rows.map((row) => [row.id, row]))
-  assert.equal(byId["1a"].gasPriceGwei, "10")
-  assert.equal(byId["1b"].gasPriceGwei, "10")
+  assert.equal(byId["1a"].gasPriceGwei, "10.000")
+  assert.equal(byId["1b"].gasPriceGwei, "10.000")
   assert.equal(byId["1a"].gasFeeTotalEth, "0.0010")
   assert.equal(byId["1b"].gasFeeTotalEth, "0.0010")
   assert.equal(byId["2"].gasFeeTotalEth, "0.0030")

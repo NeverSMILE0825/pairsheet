@@ -8,13 +8,18 @@ export type ReceiptGas = {
   effectiveGasPrice: bigint
 }
 
-/** Effective gas price in gwei (string; trim trailing zeros). */
+/** Effective gas price in gwei with exactly 3 decimal places (rounds half up). */
 export function formatGasPriceGwei(effectiveGasPriceWei: bigint): string {
-  const whole = effectiveGasPriceWei / GWEI
-  const frac = effectiveGasPriceWei % GWEI
-  if (frac === 0n) return whole.toString()
-  const fracText = frac.toString().padStart(9, "0").replace(/0+$/, "")
-  return `${whole.toString()}.${fracText}`
+  const scale = 10n ** 6n // 9 - 3
+  const rounded =
+    effectiveGasPriceWei >= 0n
+      ? (effectiveGasPriceWei + scale / 2n) / scale
+      : -((-effectiveGasPriceWei + scale / 2n) / scale)
+  const negative = rounded < 0n
+  const value = negative ? -rounded : rounded
+  const whole = value / 1000n
+  const frac = (value % 1000n).toString().padStart(3, "0")
+  return `${negative ? "-" : ""}${whole.toString()}.${frac}`
 }
 
 /** ETH amount with exactly 4 decimal places (rounds half up). */

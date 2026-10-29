@@ -21,6 +21,8 @@ export type ChartYMetric =
   | "marketCap"
   | "price"
   | "holders"
+  | "gasFee"
+  | "gasFeeTotal"
 
 export type ChartStyle = "line" | "area" | "candles" | "bars" | "columns"
 
@@ -32,6 +34,8 @@ const Y_OPTIONS: { id: ChartYMetric; label: string }[] = [
   { id: "marketCap", label: "M. Cap" },
   { id: "price", label: "Price" },
   { id: "holders", label: "Holders" },
+  { id: "gasFee", label: "Gas Fee" },
+  { id: "gasFeeTotal", label: "Gas Fee Total" },
 ]
 
 const CHART_INTERVALS: { id: string; label: string; ms: number }[] = [
@@ -79,6 +83,8 @@ function startMetric(row: MinuteRow, metric: ChartYMetric): number | null {
   if (metric === "buyCount" || metric === "buySell") return row.buyCount
   if (metric === "sellCount") return row.sellCount
   if (metric === "holders") return row.startHolders
+  if (metric === "gasFee") return num(row.startGasPriceGwei)
+  if (metric === "gasFeeTotal") return num(row.startGasFeeTotalEth)
   if (metric === "poolQuote") return num(row.startQuoteReserve)
   if (metric === "marketCap") return num(row.startMarketCapUsd)
   return num(row.startPriceUsd)
@@ -88,6 +94,8 @@ function endMetric(row: MinuteRow, metric: ChartYMetric): number | null {
   if (metric === "buyCount" || metric === "buySell") return row.buyCount
   if (metric === "sellCount") return row.sellCount
   if (metric === "holders") return row.endHolders
+  if (metric === "gasFee") return num(row.endGasPriceGwei)
+  if (metric === "gasFeeTotal") return num(row.endGasFeeTotalEth)
   if (metric === "poolQuote") return num(row.endQuoteReserve)
   if (metric === "marketCap") return num(row.endMarketCapUsd)
   return num(row.endPriceUsd)
@@ -106,6 +114,8 @@ function formatAxis(value: number, metric: ChartYMetric): string {
   if (metric === "buyCount" || metric === "sellCount" || metric === "buySell" || metric === "holders") {
     return Math.round(value).toLocaleString("en-US")
   }
+  if (metric === "gasFee") return `${value.toFixed(3)} gwei`
+  if (metric === "gasFeeTotal") return `${value.toFixed(4)} ETH`
   if (metric === "marketCap") {
     if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`
     if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}k`
@@ -236,6 +246,20 @@ function buildCandles(
       if (metric === "holders" && trade.holders != null) {
         high = Math.max(high, trade.holders)
         low = Math.min(low, trade.holders)
+      }
+      if (metric === "gasFee" && trade.gasPriceGwei != null) {
+        const gwei = Number(trade.gasPriceGwei)
+        if (Number.isFinite(gwei)) {
+          high = Math.max(high, gwei)
+          low = Math.min(low, gwei)
+        }
+      }
+      if (metric === "gasFeeTotal" && trade.gasFeeTotalEth != null) {
+        const total = Number(trade.gasFeeTotalEth)
+        if (Number.isFinite(total)) {
+          high = Math.max(high, total)
+          low = Math.min(low, total)
+        }
       }
     }
 

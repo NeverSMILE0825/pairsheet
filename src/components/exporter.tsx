@@ -155,6 +155,8 @@ type MinuteSortKey =
   | "endPriceUsd"
   | "startHolders"
   | "endHolders"
+  | "endGasPriceGwei"
+  | "endGasFeeTotalEth"
 
 const CHAINS = supportedChainNames().join(", ")
 const PAGE_ATTEMPTS = 3
@@ -1492,7 +1494,7 @@ export function Exporter() {
                 {(
                   [
                     ["transactions", "Transactions"],
-                    ["minutes", "Per minute"],
+                    ["minutes", "Deep Analysis"],
                   ] as const
                 ).map(([view, label]) => (
                   <button
@@ -1517,10 +1519,10 @@ export function Exporter() {
             </div>
             {tableView === "minutes" ? (
               <p className="text-sm text-muted-foreground">
-                Buy/sell counts per {intervalLabel} from launch ({zoneName}). Average speed is interval ÷ count.
+                Deep Analysis · buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
               </p>
             ) : (
-              <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, and funders.</p>
+              <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, gas, and funders.</p>
             )}
           </div>
 
@@ -1855,9 +1857,9 @@ export function Exporter() {
           {tableView === "minutes" ? (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1480px] border-collapse text-sm">
+              <table className="w-full min-w-[1680px] border-collapse text-sm">
                 <caption className="sr-only">
-                  Per-{intervalLabel} buy and sell counts for {pool.baseSymbol} / {pool.quoteSymbol}
+                  Deep Analysis ({intervalLabel}) for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
                 <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
                   <tr>
@@ -1876,13 +1878,15 @@ export function Exporter() {
                     <MinuteSortHeader label="End Price" column="endPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
                     <MinuteSortHeader label="Start Holders" column="startHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
                     <MinuteSortHeader label="End Holders" column="endHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Gas Fee" column="endGasPriceGwei" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Gas Fee Total" column="endGasFeeTotalEth" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
                   </tr>
                 </thead>
                 <tbody>
                   {minutePageRows.length === 0 ? (
                     <tr>
-                      <td colSpan={15} className="px-4 py-16 text-center text-muted-foreground">
-                        {intervalTooFine ? "Interval too fine for this range." : "No interval rows to show yet."}
+                      <td colSpan={17} className="px-4 py-16 text-center text-muted-foreground">
+                        {intervalTooFine ? "Interval too fine for this range." : "No Deep Analysis rows to show yet."}
                       </td>
                     </tr>
                   ) : (
@@ -1939,6 +1943,22 @@ export function Exporter() {
                         </td>
                         <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
                           {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                          title={row.endGasPriceGwei ? `${row.endGasPriceGwei} gwei at end of interval` : "Gas price unavailable"}
+                        >
+                          {row.endGasPriceGwei ? `${row.endGasPriceGwei} gwei` : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                          title={
+                            row.endGasFeeTotalEth
+                              ? `${row.endGasFeeTotalEth} ETH cumulative gas through end of interval`
+                              : "Gas fee total unavailable"
+                          }
+                        >
+                          {row.endGasFeeTotalEth ? `${row.endGasFeeTotalEth} ETH` : "—"}
                         </td>
                       </tr>
                     ))
@@ -2241,7 +2261,7 @@ export function Exporter() {
           <p className="text-xs leading-5 text-muted-foreground">
             Amounts come from the pool’s on-chain Swap, Mint (ADD) and Burn (REMOVE) events; for ADD and REMOVE the two amounts are the tokens deposited or withdrawn and Total is the quote-token side in USD. USD totals multiply the quote token by its historical price from DefiLlama. The {pool.baseSymbol} column is a whole number of tokens; hover a cell for the exact amount. The CSV keeps the full on-chain value.
             The CSV includes every row that matches the filters, not only the current page
-            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers (the pool contract and burn addresses are excluded). Gas Fee is that transaction’s effective gas price in gwei; Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
+            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers (the pool contract and burn addresses are excluded). Gas Fee is that transaction’s effective gas price in gwei (3 decimals); Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). Deep Analysis adds the same gas columns per interval and the chart Y-axis can plot Gas Fee / Gas Fee Total. The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
           </p>
         </section>
       ) : phase === "idle" || phase === "error" ? (

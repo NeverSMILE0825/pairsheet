@@ -23,6 +23,12 @@ export type MinuteRow = {
   endPriceUsd: string | null
   startHolders: number | null
   endHolders: number | null
+  /** Effective gas price (gwei) at open / close of the bucket. */
+  startGasPriceGwei: string | null
+  endGasPriceGwei: string | null
+  /** Cumulative ETH gas spend at open / close of the bucket. */
+  startGasFeeTotalEth: string | null
+  endGasFeeTotalEth: string | null
 }
 
 export type IntervalUnit = "sec" | "min" | "hour" | "d"
@@ -52,6 +58,8 @@ type Snapshot = {
   marketCapUsd: string | null
   priceUsd: string | null
   holders: number | null
+  gasPriceGwei: string | null
+  gasFeeTotalEth: string | null
 }
 
 export function intervalToMs(value: number, unit: IntervalUnit): number | null {
@@ -112,6 +120,8 @@ function applyTrade(state: Snapshot, trade: Trade): Snapshot {
     marketCapUsd: trade.marketCapUsd ?? state.marketCapUsd,
     priceUsd: trade.priceUsd ?? state.priceUsd,
     holders: trade.holders !== null ? trade.holders : state.holders,
+    gasPriceGwei: trade.gasPriceGwei ?? state.gasPriceGwei,
+    gasFeeTotalEth: trade.gasFeeTotalEth ?? state.gasFeeTotalEth,
   }
 }
 
@@ -167,7 +177,14 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
 
   const rows: MinuteRow[] = []
   let no = 1
-  let state: Snapshot = { quoteReserve: null, marketCapUsd: null, priceUsd: null, holders: null }
+  let state: Snapshot = {
+    quoteReserve: null,
+    marketCapUsd: null,
+    priceUsd: null,
+    holders: null,
+    gasPriceGwei: null,
+    gasFeeTotalEth: null,
+  }
   for (let startMs = earliest; startMs <= latest; startMs += intervalMs) {
     const endMs = startMs + intervalMs
     const startParts = isoToParts(new Date(startMs).toISOString(), zone)
@@ -179,6 +196,8 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
     const startMarketCapUsd = state.marketCapUsd
     const startPriceUsd = state.priceUsd
     const startHolders = state.holders
+    const startGasPriceGwei = state.gasPriceGwei
+    const startGasFeeTotalEth = state.gasFeeTotalEth
     for (const trade of byBucket.get(startMs) ?? []) {
       state = applyTrade(state, trade)
     }
@@ -200,6 +219,10 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
       endPriceUsd: state.priceUsd,
       startHolders,
       endHolders: state.holders,
+      startGasPriceGwei,
+      endGasPriceGwei: state.gasPriceGwei,
+      startGasFeeTotalEth,
+      endGasFeeTotalEth: state.gasFeeTotalEth,
     })
     no += 1
   }
