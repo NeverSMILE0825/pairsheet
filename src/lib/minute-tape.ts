@@ -94,15 +94,15 @@ export function averageSpeedSec(count: number, intervalMs = 60_000): number | nu
   return intervalMs / 1000 / count
 }
 
-/** Compact seconds label: 30, 7.5, 8.57 — no trailing zeros. */
+/** Compact seconds label: 30s, 7.5s, 8.57s — no trailing zeros. */
 export function formatSpeedSeconds(seconds: number): string {
   if (!Number.isFinite(seconds)) return "—"
-  if (Number.isInteger(seconds)) return String(seconds)
+  if (Number.isInteger(seconds)) return `${seconds}s`
   const fixed = seconds.toFixed(2).replace(/\.?0+$/, "")
-  return fixed
+  return `${fixed}s`
 }
 
-/** "8.57 (7 count)" — seconds between events and how many events in the bucket. */
+/** "8.57s (7 count)" — average seconds between events and how many events in the bucket. */
 export function formatSpeed(seconds: number | null, count = 0): string {
   if (seconds === null || count <= 0) return "—"
   return `${formatSpeedSeconds(seconds)} (${count} count)`
