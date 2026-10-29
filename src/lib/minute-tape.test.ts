@@ -10,6 +10,7 @@ import {
   formatBucketLabel,
   formatIntervalMs,
   formatMinuteLabel,
+  averageQuoteAmount,
   formatSpeed,
   intervalToMs,
 } from "./minute-tape"
@@ -58,9 +59,12 @@ test("average speed is interval seconds divided by the count", () => {
   assert.equal(averageSpeedSec(2, 12_000), 6)
   assert.equal(formatSpeed(null), "—")
   assert.equal(formatSpeed(30, 2), "30s")
-  assert.equal(formatSpeed(7.5, 8), "7.5s")
+  assert.equal(formatSpeed(20, 3, "0.031"), "20s (0.031)")
+  assert.equal(formatSpeed(7.5, 8, "1.250"), "7.5s (1.250)")
   assert.equal(formatSpeed(8.571428, 7), "8.57s")
   assert.equal(formatSpeed(6.666666, 9), "6.67s")
+  assert.equal(averageQuoteAmount(["0.02", "0.042"]), "0.031")
+  assert.equal(averageQuoteAmount([]), null)
 })
 
 test("converts custom interval units to milliseconds", () => {
@@ -76,11 +80,11 @@ test("builds inclusive empty minutes from launch through the last trade", () => 
   const rows = buildMinuteTape(
     [
       trade({ type: "INIT", timestamp: "2026-10-26T16:20:59.000Z", id: "i" }),
-      trade({ type: "BUY", timestamp: "2026-10-26T16:25:35.000Z", id: "b1" }),
-      trade({ type: "BUY", timestamp: "2026-10-26T16:26:01.000Z", id: "b2" }),
-      trade({ type: "BUY", timestamp: "2026-10-26T16:26:04.000Z", id: "b3" }),
-      trade({ type: "SELL", timestamp: "2026-10-26T16:29:40.000Z", id: "s1" }),
-      trade({ type: "SELL", timestamp: "2026-10-26T16:29:50.000Z", id: "s2" }),
+      trade({ type: "BUY", timestamp: "2026-10-26T16:25:35.000Z", id: "b1", quoteAmount: "0.1" }),
+      trade({ type: "BUY", timestamp: "2026-10-26T16:26:01.000Z", id: "b2", quoteAmount: "0.02" }),
+      trade({ type: "BUY", timestamp: "2026-10-26T16:26:04.000Z", id: "b3", quoteAmount: "0.04" }),
+      trade({ type: "SELL", timestamp: "2026-10-26T16:29:40.000Z", id: "s1", quoteAmount: "0.05" }),
+      trade({ type: "SELL", timestamp: "2026-10-26T16:29:50.000Z", id: "s2", quoteAmount: "0.07" }),
     ],
     "UTC",
   )
@@ -91,12 +95,15 @@ test("builds inclusive empty minutes from launch through the last trade", () => 
   assert.equal(formatMinuteLabel(rows[0].end), "Oct 26 26 16:21")
   assert.equal(rows[5].buyCount, 1) // 16:25
   assert.equal(rows[5].avgBuySpeedSec, 60)
+  assert.equal(rows[5].avgBuyQuote, "0.100")
   assert.equal(rows[6].buyCount, 2) // 16:26
   assert.equal(rows[6].avgBuySpeedSec, 30)
+  assert.equal(rows[6].avgBuyQuote, "0.030")
   assert.equal(rows[9].sellCount, 2)
   assert.equal(rows[9].avgSellSpeedSec, 30)
-  assert.equal(formatSpeed(rows[0].avgBuySpeedSec, rows[0].buyCount), "—")
-  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount), "30s")
+  assert.equal(rows[9].avgSellQuote, "0.060")
+  assert.equal(formatSpeed(rows[0].avgBuySpeedSec, rows[0].buyCount, rows[0].avgBuyQuote), "—")
+  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount, rows[6].avgBuyQuote), "30s (0.030)")
 })
 
 test("builds 12-second buckets when requested", () => {

@@ -1,3 +1,4 @@
+import { sumDecimals } from "./format"
 import { formatParts, isoToParts, type DateTimeParts } from "./timezone"
 import type { Trade } from "./types"
 
@@ -14,6 +15,9 @@ export type MinuteRow = {
   /** Average seconds between buys in this bucket (intervalSec / buys), or null if none. */
   avgBuySpeedSec: number | null
   avgSellSpeedSec: number | null
+  /** Mean quote-token size of buys in this bucket (3 decimals), or null if none. */
+  avgBuyQuote: string | null
+  avgSellQuote: string | null
   /** Pool quote reserve at the open of this bucket (carry from prior end). */
   startQuoteReserve: string | null
   endQuoteReserve: string | null
@@ -102,17 +106,40 @@ export function formatSpeedSeconds(seconds: number): string {
   return `${fixed}s`
 }
 
-/** "60s" / "7.5s" — average seconds between events in the bucket. */
-export function formatSpeed(seconds: number | null, count = 0): string {
-  if (seconds === null || count <= 0) return "—"
-  return formatSpeedSeconds(seconds)
+/** Mean quote size with exactly 3 decimals (ETH / WETH / …). */
+export function averageQuoteAmount(amounts: string[]): string | null {
+  if (amounts.length === 0) return null
+  const total = Number(sumDecimals(amounts))
+  if (!Number.isFinite(total)) return null
+  return (total / amounts.length).toFixed(3)
 }
 
-/** Hover detail: "60s average · 1 buy/sell in bucket". */
-export function formatSpeedTitle(seconds: number | null, count = 0, side: "buy" | "sell" = "buy"): string | undefined {
+/**
+ * "20s (0.031)" — average seconds between events, plus mean quote amount
+ * (3 decimals) from the same quoteAmount values as the Transactions table.
+ */
+export function formatSpeed(
+  seconds: number | null,
+  count = 0,
+  avgQuote: string | null = null,
+): string {
+  if (seconds === null || count <= 0) return "—"
+  const speed = formatSpeedSeconds(seconds)
+  return avgQuote ? `${speed} (${avgQuote})` : speed
+}
+
+/** Hover detail for the speed cell. */
+export function formatSpeedTitle(
+  seconds: number | null,
+  count = 0,
+  side: "buy" | "sell" = "buy",
+  avgQuote: string | null = null,
+): string | undefined {
   if (seconds === null || count <= 0) return undefined
   const unit = side === "buy" ? "buy" : "sell"
-  return `${formatSpeedSeconds(seconds)} average · ${count.toLocaleString("en-US")} ${unit}${count === 1 ? "" : "s"} in bucket`
+  const amount =
+    avgQuote != null ? ` · avg ${avgQuote} quote` : ""
+  return `${formatSpeedSeconds(seconds)} average · ${count.toLocaleString("en-US")} ${unit}${count === 1 ? "" : "s"} in bucket${amount}`
 }
 
 /** Bucket start/end label; keeps seconds when the interval is sub-minute. */
@@ -169,6 +196,8 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
   let latest = Number.NEGATIVE_INFINITY
   const buys = new Map<number, number>()
   const sells = new Map<number, number>()
+  const buyQuotes = new Map<number, string[]>()
+  const sellQuotes = new Map<number, string[]>()
   const byBucket = new Map<number, Trade[]>()
 
   for (const trade of trades) {
@@ -176,8 +205,17 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
     if (bucket === null) continue
     if (bucket < earliest) earliest = bucket
     if (bucket > latest) latest = bucket
-    if (trade.type === "BUY") buys.set(bucket, (buys.get(bucket) ?? 0) + 1)
-    else if (trade.type === "SELL") sells.set(bucket, (sells.get(bucket) ?? 0) + 1)
+    if (trade.type === "BUY") {
+      buys.set(bucket, (buys.get(bucket) ?? 0) + 1)
+      const quotes = buyQuotes.get(bucket)
+      if (quotes) quotes.push(trade.quoteAmount)
+      else buyQuotes.set(bucket, [trade.quoteAmount])
+    } else if (trade.type === "SELL") {
+      sells.set(bucket, (sells.get(bucket) ?? 0) + 1)
+      const quotes = sellQuotes.get(bucket)
+      if (quotes) quotes.push(trade.quoteAmount)
+      else sellQuotes.set(bucket, [trade.quoteAmount])
+    }
     const list = byBucket.get(bucket)
     if (list) list.push(trade)
     else byBucket.set(bucket, [trade])
@@ -226,6 +264,8 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
       sellCount,
       avgBuySpeedSec: averageSpeedSec(buyCount, intervalMs),
       avgSellSpeedSec: averageSpeedSec(sellCount, intervalMs),
+      avgBuyQuote: averageQuoteAmount(buyQuotes.get(startMs) ?? []),
+      avgSellQuote: averageQuoteAmount(sellQuotes.get(startMs) ?? []),
       startQuoteReserve,
       endQuoteReserve: state.quoteReserve,
       startMarketCapUsd,

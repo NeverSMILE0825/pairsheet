@@ -70,7 +70,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Deep Analysis & chart",
     summary: "Group the tape into time buckets (12s → 1 day) for counts, pool, holders, and gas.",
     bullets: [
-      "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket (shown as 60s or 7.5s; hover for the event count).",
+      "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket, shown as 20s (0.031) — seconds between trades and mean quote size (3 decimals) from the same amounts as the Transactions table.",
       "Start / End pool quote, mcap, price, and holders show how the bucket opened and closed.",
       "Gas Price / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
       "Chart Y-axis includes Gas Price and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",
@@ -79,6 +79,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "12-second buckets",
         body: "Set interval to 12 seconds to match a fast DEXTools tape. Empty buckets between the first and last trade stay in the list so gaps are visible.",
+      },
+      {
+        title: "Average Buy Speed 20s (0.031)",
+        body: "In a 1-minute bucket with 3 buys of 0.02, 0.03, and 0.043 quote, speed is 60/3 = 20s and mean quote is 0.031 (3 decimals). Those quote sizes are the same values shown in the Transactions table.",
       },
     ],
   },

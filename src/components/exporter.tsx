@@ -2146,17 +2146,17 @@ export function Exporter() {
                         {showDa("avgBuySpeedSec") ? (
                           <td
                             className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                            title={formatSpeedTitle(row.avgBuySpeedSec, row.buyCount, "buy")}
+                            title={formatSpeedTitle(row.avgBuySpeedSec, row.buyCount, "buy", row.avgBuyQuote)}
                           >
-                            {formatSpeed(row.avgBuySpeedSec, row.buyCount)}
+                            {formatSpeed(row.avgBuySpeedSec, row.buyCount, row.avgBuyQuote)}
                           </td>
                         ) : null}
                         {showDa("avgSellSpeedSec") ? (
                           <td
                             className="px-3 py-2 text-right font-mono text-xs tabular-nums"
-                            title={formatSpeedTitle(row.avgSellSpeedSec, row.sellCount, "sell")}
+                            title={formatSpeedTitle(row.avgSellSpeedSec, row.sellCount, "sell", row.avgSellQuote)}
                           >
-                            {formatSpeed(row.avgSellSpeedSec, row.sellCount)}
+                            {formatSpeed(row.avgSellSpeedSec, row.sellCount, row.avgSellQuote)}
                           </td>
                         ) : null}
                         {showDa("startQuoteReserve") ? (
