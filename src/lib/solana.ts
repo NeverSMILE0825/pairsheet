@@ -361,6 +361,7 @@ export function decodeSolanaSwap(pool: PoolContext, signature: string, tx: Solan
     quoteAmount,
     baseReserve: postBase !== null ? formatUnits(postBase, pool.base.decimals) : null,
     quoteReserve: postQuote !== null ? formatUnits(postQuote, pool.quote.decimals) : null,
+    holders: null,
     maker,
     router: "",
     makerTxCount: 0,

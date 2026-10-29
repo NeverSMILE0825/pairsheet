@@ -36,6 +36,7 @@ import {
 } from "./timezone"
 import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
+import { holdersAt, replayEvmTransfers } from "./holders"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -271,6 +272,7 @@ test("writes an excel-friendly csv", () => {
     quoteAmount: "4.45892281616295148",
     baseReserve: "1234.5",
     quoteReserve: "0.0000099",
+    holders: 1284,
     maker: "0x591f85c11cafea17f7cc926f13e2ed7c794f2522",
     router: "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
     makerTxCount: 40,
@@ -283,8 +285,8 @@ test("writes an excel-friendly csv", () => {
   assert.equal(csv.startsWith("\uFEFF"), true)
   assert.match(csv, /tx_no,date_utc,date_local,timezone,type,price_usd,total_usd/)
   assert.match(csv, /17,2024-08-04T15:54:23\.000Z,2024-08-05 00:54:23,Asia\/Seoul,SELL/)
-  assert.match(csv, /quote_amount,pool_base_after,pool_quote_after,maker/)
-  assert.match(csv, /4\.45892281616295148,1234\.5,0\.0000099,0x591f/)
+  assert.match(csv, /quote_amount,pool_base_after,pool_quote_after,holders,maker/)
+  assert.match(csv, /4\.45892281616295148,1234\.5,0\.0000099,1284,0x591f/)
   assert.match(csv, /,40,bot;team,0x7a250d56/)
   assert.match(csv, /"0xabc,def"/)
   assert.match(csv, /Disperse\.app,0xd152f549545093347a162dce210e7293f1452150/)
@@ -402,6 +404,18 @@ test("reads uniswap v4 pool sizes from swap liquidity and sqrt price", async () 
   assert.deepEqual(sizes.get(swapKey(log)), { base: "1000000", quote: "1000000" })
 })
 
+test("replays ERC-20 transfers into exact holder counts per log", () => {
+  const timeline = replayEvmTransfers([
+    { blockNumber: 1, logIndex: 1, from: "0x0000000000000000000000000000000000000000", to: "0x1111111111111111111111111111111111111111", amount: 100n },
+    { blockNumber: 2, logIndex: 1, from: "0x1111111111111111111111111111111111111111", to: "0x2222222222222222222222222222222222222222", amount: 40n },
+    { blockNumber: 2, logIndex: 5, from: "0x1111111111111111111111111111111111111111", to: "0x3333333333333333333333333333333333333333", amount: 60n },
+  ])
+  assert.equal(holdersAt(timeline, 1, 1), 1)
+  assert.equal(holdersAt(timeline, 2, 1), 2)
+  assert.equal(holdersAt(timeline, 2, 5), 2)
+  assert.equal(holdersAt(timeline, 2, 0), 1)
+})
+
 test("detects the Solana wallet that funded a maker with SOL", () => {
   const maker = "Maker1111111111111111111111111111111111111"
   const funder = "Funder111111111111111111111111111111111111"
@@ -449,6 +463,7 @@ test("counts wallet transactions and tags bots and team wallets", () => {
     quoteAmount: "1",
     baseReserve: null,
     quoteReserve: null,
+    holders: null,
     fundedBy: null,
     fundedByAddress: null,
     txHash: "0x1",
@@ -498,6 +513,7 @@ test("numbers transactions oldest-first and keeps them when reordered", () => {
     quoteAmount: "1",
     baseReserve: null,
     quoteReserve: null,
+    holders: null,
     maker: "0x3333333333333333333333333333333333333333",
     router: "0x4444444444444444444444444444444444444444",
     makerTxCount: 0,

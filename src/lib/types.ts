@@ -66,6 +66,8 @@ export type Trade = {
   quoteAmount: string
   baseReserve: string | null
   quoteReserve: string | null
+  /** Unique non-zero base-token holders right after this trade. */
+  holders: number | null
   maker: string
   router: string
   makerTxCount: number

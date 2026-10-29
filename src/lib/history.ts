@@ -366,6 +366,7 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       quoteAmount,
       baseReserve: size?.base ?? null,
       quoteReserve: size?.quote ?? null,
+      holders: null,
       totalUsd: usd,
       priceUsd: usd && !oneSided ? priceUsdFromTotal(usd, baseAmount) : null,
       maker: makers.get(log.txHash.toLowerCase())?.from ?? "",

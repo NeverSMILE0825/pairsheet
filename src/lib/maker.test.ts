@@ -23,6 +23,7 @@ function trade(partial: Partial<Trade> & Pick<Trade, "type" | "maker">): Trade {
     baseAmount: "0",
     quoteAmount: "0",
     baseReserve: null,
+    holders: null,
     quoteReserve: null,
     router: "",
     makerTxCount: 0,

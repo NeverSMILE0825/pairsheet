@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getChain, supportedChainNames } from "@/lib/chains"
 import { resolveFunders } from "@/lib/funded"
+import { resolveHolderCounts } from "@/lib/holders"
 import { getSwapPage } from "@/lib/history"
 import { AppError } from "@/lib/http"
 import { lookUpWallets } from "@/lib/wallets"
@@ -75,6 +76,7 @@ type SortKey =
   | "others"
   | "baseReserve"
   | "quoteReserve"
+  | "holders"
   | "maker"
   | "makerTxCount"
   | "fundedBy"
@@ -131,6 +133,7 @@ export function Exporter() {
   })
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
+  const [holdersBusy, setHoldersBusy] = useState(false)
   const run = useRef(0)
   const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -241,6 +244,35 @@ export function Exporter() {
     if (run.current === token) setFunding(null)
   }
 
+  async function lookUpHolders(chainId: string, view: PoolView, loaded: Trade[], token: number) {
+    const chain = getChain(chainId)
+    if (!chain || loaded.length === 0) return
+    setHoldersBusy(true)
+    try {
+      const { counts, truncated } = await resolveHolderCounts(chain, view, loaded)
+      if (run.current !== token) return
+      setTrades((current) =>
+        current.map((trade) => {
+          const holders = counts.get(trade.id)
+          return holders === undefined || trade.holders !== null ? trade : { ...trade, holders }
+        }),
+      )
+      if (truncated) {
+        setWarning((current) =>
+          current?.includes("holder")
+            ? current
+            : [current, "Holder history was truncated for this token; some older rows may show blanks."]
+                .filter(Boolean)
+                .join(" "),
+        )
+      }
+    } catch {
+      // Keep swaps usable even if holder reconstruction fails.
+    } finally {
+      if (run.current === token) setHoldersBusy(false)
+    }
+  }
+
   async function load(target = url) {
     const trimmed = target.trim()
     run.current += 1
@@ -257,6 +289,7 @@ export function Exporter() {
     selectionAnchor.current = null
     setIncome(null)
     setFunding(null)
+    setHoldersBusy(false)
     setStartAt(null)
     setEndAt(null)
     setPeriod(null)
@@ -310,7 +343,10 @@ export function Exporter() {
         }
       } while (cursor)
       setPhase("done")
-      if (poolView) void lookUpWalletFacts(chainId, poolView, loaded, token)
+      if (poolView) {
+        void lookUpWalletFacts(chainId, poolView, loaded, token)
+        void lookUpHolders(chainId, poolView, loaded, token)
+      }
       void lookUpFunders(
         chainId,
         loaded.map((trade) => trade.maker),
@@ -638,6 +674,10 @@ export function Exporter() {
       {phase === "loading" ? (
         <p className="text-sm text-muted-foreground" role="status">
           {progress}
+        </p>
+      ) : holdersBusy ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          Counting exact base-token holders at each transaction…
         </p>
       ) : funding ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -988,6 +1028,7 @@ export function Exporter() {
                     <SortHeader label={pool.quoteSymbol} column="quoteAmount" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={`Pool ${pool.baseSymbol}`} column="baseReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
+                    <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <th
                       className="px-3 py-2 font-medium text-left"
                       aria-sort={
@@ -1012,7 +1053,7 @@ export function Exporter() {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={14} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={15} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : trades.length === 0
@@ -1061,6 +1102,12 @@ export function Exporter() {
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={trade.quoteReserve ?? "Pool size unavailable"}>
                           {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                          title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
+                        >
+                          {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {trade.maker ? (
@@ -1205,14 +1252,14 @@ export function Exporter() {
           <p className="text-xs leading-5 text-muted-foreground">
             Amounts come from the pool’s on-chain Swap, Mint (ADD) and Burn (REMOVE) events; for ADD and REMOVE the two amounts are the tokens deposited or withdrawn and Total is the quote-token side in USD. USD totals multiply the quote token by its historical price from DefiLlama. The {pool.baseSymbol} column is a whole number of tokens; hover a cell for the exact amount. The CSV keeps the full on-chain value.
             The CSV includes every row that matches the filters, not only the current page
-            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
+            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers. The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
           </p>
         </section>
       ) : phase === "idle" || phase === "error" ? (
         <section className="grid gap-3 sm:grid-cols-3">
           <Step n="1" title="Paste the pair" body="Use the pair-explorer URL from DEXTools, including the chain and pool address." />
           <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the pool’s logs, with the wallet that sent each transaction and the pool size after it." />
-          <Step n="3" title="Save the CSV" body="Date, type, USD price, total, both token amounts, pool size, maker, who funded that wallet, and transaction hash." />
+          <Step n="3" title="Save the CSV" body="Date, type, USD price, total, both token amounts, pool size, holders, maker, who funded that wallet, and transaction hash." />
         </section>
       ) : null}
     </div>
@@ -1263,6 +1310,7 @@ function tagWeight(trade: Trade): number {
 function isMissing(trade: Trade, key: SortKey): boolean {
   if (key === "selected" || key === "others" || key === "makerTxCount" || key === "txNo") return false
   if (key === "fundedBy") return !trade.fundedBy
+  if (key === "holders") return trade.holders === null
   if (key === "maker") return !trade.maker
   if (key === "timestamp" || key === "type") return false
   return trade[key] === null
@@ -1275,6 +1323,7 @@ function compareTrades(a: Trade, b: Trade, key: SortKey): number {
   if (key === "selected" || key === "others") return 0
   if (key === "makerTxCount") return a.makerTxCount - b.makerTxCount
   if (key === "txNo") return a.txNo - b.txNo
+  if (key === "holders") return (a.holders ?? -1) - (b.holders ?? -1)
   return compareDecimal(a[key] ?? "0", b[key] ?? "0")
 }
 
