@@ -20,16 +20,18 @@ import {
   compareDecimal,
   formatGroupedAmount,
   formatIntegerAmount,
+  changeTone,
   formatPoolSize,
   formatIncome,
   formatTiny,
   formatUsd,
+  formatUsdInteger,
   normalizeAddress,
   shortAddress,
   sumDecimals,
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
-import { latestQuoteUsdPrice, quoteAmountToUsd } from "@/lib/trade-size"
+import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trade-size"
 import { buildMinuteTape, formatMinuteLabel, formatSpeed, type MinuteRow } from "@/lib/minute-tape"
 import {
   analysisId,
@@ -1419,32 +1421,40 @@ export function Exporter() {
                         <td className="px-3 py-2 text-right font-mono text-xs" title={row.startQuoteReserve ?? undefined}>
                           {row.startQuoteReserve ? formatPoolSize(row.startQuoteReserve) : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs" title={row.endQuoteReserve ?? undefined}>
+                        <td
+                          className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startQuoteReserve, row.endQuoteReserve)}`}
+                          title={row.endQuoteReserve ?? undefined}
+                        >
                           {row.endQuoteReserve ? (
                             <span className="inline-flex items-center justify-end gap-1.5">
                               {formatPoolSize(row.endQuoteReserve)}
-                              <TradeSizeIcon usd={quoteAmountToUsd(row.endQuoteReserve, quoteUsdPrice)} />
+                              <TradeSizeIcon
+                                usd={quoteAmountToUsd(
+                                  quoteAbsDelta(row.startQuoteReserve, row.endQuoteReserve),
+                                  quoteUsdPrice,
+                                )}
+                              />
                             </span>
                           ) : (
                             "—"
                           )}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">
-                          {row.startMarketCapUsd ? formatUsd(row.startMarketCapUsd) : "—"}
+                          {row.startMarketCapUsd ? formatUsdInteger(row.startMarketCapUsd) : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">
-                          {row.endMarketCapUsd ? formatUsd(row.endMarketCapUsd) : "—"}
+                        <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startMarketCapUsd, row.endMarketCapUsd)}`}>
+                          {row.endMarketCapUsd ? formatUsdInteger(row.endMarketCapUsd) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">
                           {row.startPriceUsd ? `$${formatTiny(Number(row.startPriceUsd))}` : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs">
+                        <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
                           {row.endPriceUsd ? `$${formatTiny(Number(row.endPriceUsd))}` : "—"}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
                           {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
+                        <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
                           {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                         </td>
                       </tr>
@@ -1573,7 +1583,7 @@ export function Exporter() {
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs">{formatGroupedAmount(trade.quoteAmount)}</td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={trade.baseReserve ?? "Pool size unavailable"}>
-                          {trade.baseReserve ? formatPoolSize(trade.baseReserve) : "—"}
+                          {trade.baseReserve ? formatIntegerAmount(trade.baseReserve) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right font-mono text-xs" title={trade.quoteReserve ?? "Pool size unavailable"}>
                           {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}

@@ -123,6 +123,35 @@ export function formatUsd(amount: string | null): string {
   return `$${formatTiny(value)}`
 }
 
+/** Whole-dollar market-cap style amounts (no cents). */
+export function formatUsdInteger(amount: string | null): string {
+  if (!amount) return "—"
+  const value = Number(amount)
+  if (!Number.isFinite(value)) return "—"
+  const rounded = Math.round(value)
+  if (rounded === 0) return "$0"
+  return `$${rounded.toLocaleString("en-US")}`
+}
+
+/** Green when end rose, red when it fell, default when equal/unknown. */
+export function changeTone(
+  start: string | number | null | undefined,
+  end: string | number | null | undefined,
+): string {
+  if (end === null || end === undefined) return ""
+  const a =
+    start === null || start === undefined
+      ? 0
+      : typeof start === "number"
+        ? start
+        : Number(start)
+  const b = typeof end === "number" ? end : Number(end)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return ""
+  if (b > a) return "text-emerald-400"
+  if (b < a) return "text-rose-400"
+  return ""
+}
+
 // Dollar amounts on the maker panel. Negatives render as -$10.83.
 // Amounts of $1,000,000 and up use the compact form so the column stays narrow.
 export function formatPanelUsd(amount: string | null): string {

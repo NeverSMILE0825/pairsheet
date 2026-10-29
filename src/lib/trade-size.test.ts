@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   latestQuoteUsdPrice,
+  quoteAbsDelta,
   quoteAmountToUsd,
   quoteUsdPriceFromTrade,
   tradeSizeFromUsd,
@@ -33,4 +34,8 @@ test("derives quote USD price and pool USD from trades", () => {
   assert.equal(price, 2500)
   assert.equal(quoteAmountToUsd("0.02", 2500), 50)
   assert.equal(quoteAmountToUsd(null, 2500), null)
+  assert.equal(quoteAbsDelta("1.0", "2.5"), "1.5")
+  assert.equal(quoteAbsDelta("5.1317", "2.1652"), String(Math.abs(2.1652 - 5.1317)))
+  assert.equal(quoteAbsDelta(null, "1"), "1")
+  assert.equal(quoteAbsDelta("1", null), null)
 })

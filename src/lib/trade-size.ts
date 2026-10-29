@@ -64,3 +64,12 @@ export function quoteAmountToUsd(amount: string | null, quoteUsdPrice: number | 
   const usd = qty * quoteUsdPrice
   return Number.isFinite(usd) ? usd : null
 }
+
+/** Absolute quote-reserve change between two snapshots (for size icons). */
+export function quoteAbsDelta(start: string | null, end: string | null): string | null {
+  if (end === null) return null
+  const before = start === null ? 0 : Number(start)
+  const after = Number(end)
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return null
+  return String(Math.abs(after - before))
+}
