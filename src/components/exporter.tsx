@@ -774,28 +774,46 @@ export function Exporter() {
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex gap-1 rounded-lg bg-muted p-1">
-              {(
-                [
-                  ["transactions", "Transactions"],
-                  ["minutes", "Per minute"],
-                ] as const
-              ).map(([view, label]) => (
-                <button
-                  key={view}
-                  type="button"
-                  aria-pressed={tableView === view}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${tableView === view ? "bg-background text-foreground" : "text-muted-foreground"}`}
-                  onClick={() => {
-                    setTableView(view)
-                    setPage(0)
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+          <div className="flex flex-col gap-2 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <span className="text-sm font-medium text-foreground">Table view</span>
+              <div className="flex gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="Table view">
+                {(
+                  [
+                    ["transactions", "Transactions"],
+                    ["minutes", "Per minute"],
+                  ] as const
+                ).map(([view, label]) => (
+                  <button
+                    key={view}
+                    type="button"
+                    role="tab"
+                    aria-selected={tableView === view}
+                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                      tableView === view
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      setTableView(view)
+                      setPage(0)
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
+            {tableView === "minutes" ? (
+              <p className="text-sm text-muted-foreground">
+                Buy/sell counts each minute from launch ({zoneName}). Average speed is 60s ÷ count.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, and funders.</p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             {tableView === "transactions" ? (
             <div className="flex gap-1 rounded-lg bg-muted p-1">
               {(Object.keys(FILTER_LABELS) as SideFilter[]).map((side) => (
@@ -815,9 +833,7 @@ export function Exporter() {
               ))}
             </div>
             ) : (
-              <p className="text-sm text-muted-foreground">
-                Buy/sell counts each minute from launch ({zoneName}). Average speed is 60s ÷ count.
-              </p>
+              <span className="text-sm text-muted-foreground">Type filters apply on the Transactions view.</span>
             )}
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               Time zone
