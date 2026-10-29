@@ -48,12 +48,17 @@ import {
   type MinuteRow,
 } from "@/lib/minute-tape"
 import {
+  clearSync,
   fetchRemoteBookmarks,
+  formatSyncAgo,
+  getSyncStatus,
   getSyncToken,
   hasSyncToken,
   publishBookmarks,
   setSyncToken,
   syncTokenHelpUrl,
+  validateSyncToken,
+  type SyncStatus,
 } from "@/lib/bookmarks-sync"
 import {
   analysisId,
@@ -224,12 +229,15 @@ export function Exporter() {
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
   const [syncEnabled, setSyncEnabled] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => getSyncStatus())
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [showSyncSetup, setShowSyncSetup] = useState(false)
   const importFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     setSyncEnabled(hasSyncToken())
     setSyncTokenDraft(getSyncToken())
+    setSyncStatus(getSyncStatus())
     void refreshSavedList()
   }, [])
 
@@ -260,6 +268,8 @@ export function Exporter() {
     const merged = mergeSavedMeta(local, remote.bookmarks)
     await publishBookmarks(merged)
     setSavedList(merged)
+    setSyncStatus(getSyncStatus())
+    setSyncEnabled(true)
   }
 
   async function lookUpWalletFacts(chainId: string, view: PoolView, loaded: Trade[], token: number) {
@@ -960,36 +970,58 @@ export function Exporter() {
   }
 
   async function saveSyncToken() {
-    setSyncToken(syncTokenDraft)
-    const enabled = hasSyncToken()
-    setSyncEnabled(enabled)
-    if (!enabled) {
-      setSaveNotice("Cloud sync turned off. Saved pairs stay on this browser only.")
+    const token = syncTokenDraft.trim()
+    setSyncMessage(null)
+    if (!token) {
+      clearSync()
+      setSyncEnabled(false)
+      setSyncStatus(getSyncStatus())
+      setSyncMessage("Cloud sync turned off. Saved pairs stay on this browser only.")
       return
     }
     setSyncBusy(true)
     try {
+      const check = await validateSyncToken(token)
+      if (!check.ok) {
+        setSyncEnabled(false)
+        setSyncStatus(getSyncStatus())
+        setSyncMessage(check.error)
+        return
+      }
+      setSyncToken(token)
+      setSyncEnabled(true)
       await publishMergedBookmarks()
       setShowSyncSetup(false)
-      setSaveNotice("Cloud sync on. Saved pairs now show in Edge and on other PCs.")
+      setSyncMessage(
+        `Synced ${savedList.length || (await listSavedAnalyses()).length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
+      )
+      setSaveNotice("Cloud sync is on. Saved pairs are on the shared list.")
     } catch (error) {
-      setSaveNotice(error instanceof Error ? error.message : "Could not publish bookmarks.")
+      setSyncStatus(getSyncStatus())
+      setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
     } finally {
       setSyncBusy(false)
+      setSyncStatus(getSyncStatus())
     }
   }
 
   async function publishNow() {
     if (!hasSyncToken()) {
       setShowSyncSetup(true)
+      setSyncMessage("Paste a GitHub token first, then publish.")
       return
     }
     setSyncBusy(true)
+    setSyncMessage(null)
     try {
       await publishMergedBookmarks()
-      setSaveNotice("Published local saved pairs to the shared list.")
+      const status = getSyncStatus()
+      setSyncStatus(status)
+      setSyncMessage(`Published ${status.lastCount} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
+      setSaveNotice(`Published ${status.lastCount} saved pair(s) to the shared list.`)
     } catch (error) {
-      setSaveNotice(error instanceof Error ? error.message : "Could not publish bookmarks.")
+      setSyncStatus(getSyncStatus())
+      setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
     } finally {
       setSyncBusy(false)
     }
@@ -1044,6 +1076,9 @@ export function Exporter() {
             className="h-11 px-4"
             disabled={phase === "loading"}
             onClick={() => {
+              setSyncEnabled(hasSyncToken())
+              setSyncStatus(getSyncStatus())
+              setSyncMessage(null)
               void refreshSavedList()
               setSavedOpen(true)
             }}
@@ -1087,6 +1122,34 @@ export function Exporter() {
                     ? "Synced across browsers via GitHub. Star a pair to pin it."
                     : "This browser keeps full snapshots. Enable sync or Export so Edge / other PCs can see them."}
                 </p>
+                <p
+                  className={`mt-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs ${
+                    syncEnabled && !syncStatus.lastError
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : syncStatus.lastError
+                        ? "bg-amber-500/15 text-amber-400"
+                        : "bg-muted text-muted-foreground"
+                  }`}
+                  role="status"
+                >
+                  <span
+                    aria-hidden
+                    className={`size-1.5 rounded-full ${
+                      syncEnabled && !syncStatus.lastError
+                        ? "bg-emerald-500"
+                        : syncStatus.lastError
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground"
+                    }`}
+                  />
+                  {syncBusy
+                    ? "Syncing with GitHub…"
+                    : syncEnabled && syncStatus.lastOkAt && !syncStatus.lastError
+                      ? `Synced · ${syncStatus.lastCount} pair(s) · ${formatSyncAgo(syncStatus.lastOkAt)}`
+                      : syncStatus.lastError
+                        ? "Sync failed — see details below"
+                        : "Not synced · this browser only"}
+                </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close saved pairs" onClick={() => setSavedOpen(false)}>
                 <X className="size-4" />
@@ -1109,24 +1172,49 @@ export function Exporter() {
                 className="hidden"
                 onChange={(event) => void onImportVault(event.target.files?.[0] ?? null)}
               />
-              <Button type="button" size="sm" variant="outline" onClick={() => setShowSyncSetup((value) => !value)}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className={syncEnabled && !syncStatus.lastError ? "border-emerald-500/40 text-emerald-400" : undefined}
+                onClick={() => {
+                  setShowSyncSetup((value) => !value)
+                  setSyncMessage(null)
+                }}
+              >
                 <Cloud className="size-3.5" />
-                {syncEnabled ? "Sync on" : "Enable sync"}
+                {syncEnabled ? "Sync settings" : "Enable sync"}
               </Button>
               {syncEnabled ? (
                 <Button type="button" size="sm" variant="ghost" disabled={syncBusy} onClick={() => void publishNow()}>
                   {syncBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  Publish
+                  Publish now
                 </Button>
               ) : null}
             </div>
 
+            {syncMessage || syncStatus.lastError ? (
+              <div
+                className={`border-b border-border px-4 py-2 text-xs ${
+                  syncMessage?.toLowerCase().includes("fail") ||
+                  syncMessage?.toLowerCase().includes("denied") ||
+                  syncMessage?.toLowerCase().includes("rejected") ||
+                  syncStatus.lastError
+                    ? "bg-amber-500/10 text-amber-300"
+                    : "bg-emerald-500/10 text-emerald-300"
+                }`}
+                role="status"
+              >
+                {syncMessage ?? syncStatus.lastError}
+              </div>
+            ) : null}
+
             {showSyncSetup ? (
               <div className="space-y-2 border-b border-border px-4 py-3 text-sm">
                 <p className="text-xs text-muted-foreground">
-                  Create a fine-grained GitHub PAT with Contents Read and Write on{" "}
-                  <span className="font-mono">NeverSMILE0825/pairsheet</span>, paste it once per browser, then Publish.
-                  Other browsers only need to open the site — the shared list loads automatically.
+                  Create a <strong>new</strong> fine-grained GitHub PAT (revoke any token you pasted in chat). Grant Contents
+                  Read and Write on <span className="font-mono">NeverSMILE0825/pairsheet</span>, paste it here once per
+                  browser, then Save token &amp; publish. Other browsers only open the site to see the shared list.
                 </p>
                 <a className="text-xs text-primary hover:underline" href={syncTokenHelpUrl()} target="_blank" rel="noreferrer">
                   Create fine-grained token
@@ -1152,9 +1240,11 @@ export function Exporter() {
                       size="sm"
                       variant="ghost"
                       onClick={() => {
+                        clearSync()
                         setSyncTokenDraft("")
-                        setSyncToken("")
                         setSyncEnabled(false)
+                        setSyncStatus(getSyncStatus())
+                        setSyncMessage("Cloud sync turned off on this browser.")
                         setSaveNotice("Cloud sync turned off on this browser.")
                       }}
                     >
