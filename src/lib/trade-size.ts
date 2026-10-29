@@ -1,19 +1,20 @@
-/** DEXTools-style swap size tiers from trade USD total. */
-export type TradeSizeTier = "plankton" | "shrimp" | "fish" | "dolphin" | "whale"
+/** DEXTools trade-size animals (same tiers + colors as Pair Explorer). */
+export type TradeSizeTier = "flea" | "shrimp" | "fish" | "dolphin" | "whale"
 
 export type TradeSizeInfo = {
   tier: TradeSizeTier
   label: string
   /** Short range shown in tooltips. */
   range: string
+  color: string
 }
 
-const TIERS: { tier: TradeSizeTier; min: number; label: string; range: string }[] = [
-  { tier: "whale", min: 100_000, label: "Whale", range: "$100k+" },
-  { tier: "dolphin", min: 10_000, label: "Dolphin", range: "$10k–$100k" },
-  { tier: "fish", min: 1_000, label: "Fish", range: "$1k–$10k" },
-  { tier: "shrimp", min: 1, label: "Shrimp", range: "$1–$1k" },
-  { tier: "plankton", min: 0, label: "Plankton", range: "under $1" },
+const TIERS: { tier: TradeSizeTier; min: number; label: string; range: string; color: string }[] = [
+  { tier: "whale", min: 100_000, label: "Whale", range: "$100k+", color: "#35c4dc" },
+  { tier: "dolphin", min: 10_000, label: "Dolphin", range: "$10k–$100k", color: "#818ea1" },
+  { tier: "fish", min: 1_000, label: "Fish", range: "$1k–$10k", color: "#8183f4" },
+  { tier: "shrimp", min: 1, label: "Shrimp", range: "$1–$1k", color: "#fa8e42" },
+  { tier: "flea", min: 0, label: "Flea", range: "under $1", color: "#bf8c00" },
 ]
 
 export function tradeSizeFromUsd(usd: number | string | null | undefined): TradeSizeInfo | null {
@@ -22,7 +23,7 @@ export function tradeSizeFromUsd(usd: number | string | null | undefined): Trade
   if (!Number.isFinite(value) || value < 0) return null
   for (const tier of TIERS) {
     if (value >= tier.min) {
-      return { tier: tier.tier, label: tier.label, range: tier.range }
+      return { tier: tier.tier, label: tier.label, range: tier.range, color: tier.color }
     }
   }
   return TIERS[TIERS.length - 1]

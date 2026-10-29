@@ -8,10 +8,12 @@ import {
 } from "./trade-size"
 
 test("maps USD totals onto DEXTools-style size tiers", () => {
-  assert.equal(tradeSizeFromUsd(0.01)?.tier, "plankton")
-  assert.equal(tradeSizeFromUsd(0.99)?.tier, "plankton")
+  assert.equal(tradeSizeFromUsd(0.01)?.tier, "flea")
+  assert.equal(tradeSizeFromUsd(0.99)?.tier, "flea")
+  assert.equal(tradeSizeFromUsd(0.01)?.color, "#bf8c00")
   assert.equal(tradeSizeFromUsd(1)?.tier, "shrimp")
   assert.equal(tradeSizeFromUsd(797)?.tier, "shrimp")
+  assert.equal(tradeSizeFromUsd(797)?.color, "#fa8e42")
   assert.equal(tradeSizeFromUsd(1000)?.tier, "fish")
   assert.equal(tradeSizeFromUsd(9999)?.tier, "fish")
   assert.equal(tradeSizeFromUsd(10_000)?.tier, "dolphin")

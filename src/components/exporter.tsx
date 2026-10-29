@@ -30,7 +30,7 @@ import {
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { latestQuoteUsdPrice, quoteAmountToUsd } from "@/lib/trade-size"
-import { buildMinuteTape, formatMinuteLabel, formatSpeed } from "@/lib/minute-tape"
+import { buildMinuteTape, formatMinuteLabel, formatSpeed, type MinuteRow } from "@/lib/minute-tape"
 import {
   analysisId,
   compareSavedMeta,
@@ -99,6 +99,23 @@ type SortKey =
   | "makerTxCount"
   | "fundedBy"
 
+type MinuteSortKey =
+  | "no"
+  | "startMs"
+  | "endMs"
+  | "buyCount"
+  | "sellCount"
+  | "avgBuySpeedSec"
+  | "avgSellSpeedSec"
+  | "startQuoteReserve"
+  | "endQuoteReserve"
+  | "startMarketCapUsd"
+  | "endMarketCapUsd"
+  | "startPriceUsd"
+  | "endPriceUsd"
+  | "startHolders"
+  | "endHolders"
+
 const CHAINS = supportedChainNames().join(", ")
 const PAGE_ATTEMPTS = 3
 const FUNDER_BATCH = 6
@@ -139,6 +156,8 @@ export function Exporter() {
   const [funder, setFunder] = useState("")
   const [sortKey, setSortKey] = useState<SortKey>("timestamp")
   const [sortDesc, setSortDesc] = useState(true)
+  const [minuteSortKey, setMinuteSortKey] = useState<MinuteSortKey>("startMs")
+  const [minuteSortDesc, setMinuteSortDesc] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [tableView, setTableView] = useState<TableView>("transactions")
@@ -519,7 +538,16 @@ export function Exporter() {
     })
   }, [trades, funder, query, period])
 
-  const minuteRows = useMemo(() => buildMinuteTape(minuteSource, zone), [minuteSource, zone])
+  const minuteRows = useMemo(() => {
+    const rows = buildMinuteTape(minuteSource, zone)
+    const direction = minuteSortDesc ? -1 : 1
+    return [...rows].sort((a, b) => {
+      const missingA = isMinuteMissing(a, minuteSortKey)
+      const missingB = isMinuteMissing(b, minuteSortKey)
+      if (missingA !== missingB) return missingA ? 1 : -1
+      return compareMinuteRows(a, b, minuteSortKey) * direction || a.startMs - b.startMs
+    })
+  }, [minuteSource, zone, minuteSortKey, minuteSortDesc])
 
   const listLength = tableView === "minutes" ? minuteRows.length : filtered.length
   const pageCount = Math.max(1, Math.ceil(listLength / pageSize))
@@ -683,6 +711,15 @@ export function Exporter() {
     }
     setSortKey(key)
     setSortDesc(key !== "maker" && key !== "type" && key !== "fundedBy" && key !== "txNo")
+  }
+
+  function toggleMinuteSort(key: MinuteSortKey) {
+    if (minuteSortKey === key) {
+      setMinuteSortDesc((value) => !value)
+      return
+    }
+    setMinuteSortKey(key)
+    setMinuteSortDesc(key !== "no" && key !== "startMs" && key !== "endMs")
   }
 
   function download() {
@@ -1339,21 +1376,21 @@ export function Exporter() {
                 </caption>
                 <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
                   <tr>
-                    <th className="px-3 py-2 font-medium text-right">No</th>
-                    <th className="px-3 py-2 font-medium">Start Time ({zoneName})</th>
-                    <th className="px-3 py-2 font-medium">End Time ({zoneName})</th>
-                    <th className="px-3 py-2 font-medium text-right">Buy Count</th>
-                    <th className="px-3 py-2 font-medium text-right">Sell Count</th>
-                    <th className="px-3 py-2 font-medium text-right">Average Buy Speed</th>
-                    <th className="px-3 py-2 font-medium text-right">Average Sell Speed</th>
-                    <th className="px-3 py-2 font-medium text-right">Start Pool {pool.quoteSymbol}</th>
-                    <th className="px-3 py-2 font-medium text-right">End Pool {pool.quoteSymbol}</th>
-                    <th className="px-3 py-2 font-medium text-right">Start M. Cap</th>
-                    <th className="px-3 py-2 font-medium text-right">End M. Cap</th>
-                    <th className="px-3 py-2 font-medium text-right">Start Price</th>
-                    <th className="px-3 py-2 font-medium text-right">End Price</th>
-                    <th className="px-3 py-2 font-medium text-right">Start Holders</th>
-                    <th className="px-3 py-2 font-medium text-right">End Holders</th>
+                    <MinuteSortHeader label="No" column="no" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label={`Start Time (${zoneName})`} column="startMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} />
+                    <MinuteSortHeader label={`End Time (${zoneName})`} column="endMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} />
+                    <MinuteSortHeader label="Buy Count" column="buyCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Sell Count" column="sellCount" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Average Buy Speed" column="avgBuySpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Average Sell Speed" column="avgSellSpeedSec" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label={`Start Pool ${pool.quoteSymbol}`} column="startQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label={`End Pool ${pool.quoteSymbol}`} column="endQuoteReserve" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Start M. Cap" column="startMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="End M. Cap" column="endMarketCapUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Start Price" column="startPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="End Price" column="endPriceUsd" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="Start Holders" column="startHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
+                    <MinuteSortHeader label="End Holders" column="endHolders" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1769,6 +1806,21 @@ function compareTrades(a: Trade, b: Trade, key: SortKey): number {
   return compareDecimal(a[key] ?? "0", b[key] ?? "0")
 }
 
+function isMinuteMissing(row: MinuteRow, key: MinuteSortKey): boolean {
+  if (key === "no" || key === "startMs" || key === "endMs" || key === "buyCount" || key === "sellCount") return false
+  return row[key] === null
+}
+
+function compareMinuteRows(a: MinuteRow, b: MinuteRow, key: MinuteSortKey): number {
+  if (key === "no" || key === "startMs" || key === "endMs" || key === "buyCount" || key === "sellCount") {
+    return a[key] - b[key]
+  }
+  if (key === "avgBuySpeedSec" || key === "avgSellSpeedSec" || key === "startHolders" || key === "endHolders") {
+    return (a[key] ?? -1) - (b[key] ?? -1)
+  }
+  return compareDecimal(a[key] ?? "0", b[key] ?? "0")
+}
+
 function SortHeader({
   label,
   column,
@@ -1827,6 +1879,39 @@ function SortButton({
       {label}
       {active ? desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-40" />}
     </button>
+  )
+}
+
+function MinuteSortHeader({
+  label,
+  column,
+  sortKey,
+  desc,
+  onSort,
+  align = "left",
+}: {
+  label: string
+  column: MinuteSortKey
+  sortKey: MinuteSortKey
+  desc: boolean
+  onSort: (column: MinuteSortKey) => void
+  align?: "left" | "right"
+}) {
+  const active = sortKey === column
+  return (
+    <th
+      className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+      aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
+    >
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}
+        onClick={() => onSort(column)}
+      >
+        {label}
+        {active ? desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-40" />}
+      </button>
+    </th>
   )
 }
 
