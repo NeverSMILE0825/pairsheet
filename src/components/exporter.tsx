@@ -135,6 +135,8 @@ type SortKey =
   | "maker"
   | "makerTxCount"
   | "fundedBy"
+  | "gasPriceGwei"
+  | "gasFeeTotalEth"
 
 type MinuteSortKey =
   | "no"
@@ -1949,7 +1951,7 @@ export function Exporter() {
           ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1720px] border-collapse text-sm">
+              <table className="w-full min-w-[1920px] border-collapse text-sm">
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -1988,6 +1990,8 @@ export function Exporter() {
                     <SortHeader label={`Pool ${pool.baseSymbol}`} column="baseReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
+                    <SortHeader label="Gas Fee" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
+                    <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" />
                     <th
                       className="px-3 py-2 font-medium text-left"
                       aria-sort={
@@ -2012,7 +2016,7 @@ export function Exporter() {
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={16} className="px-4 py-16 text-center text-muted-foreground">
+                      <td colSpan={18} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : trades.length === 0
@@ -2075,6 +2079,22 @@ export function Exporter() {
                           title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
                         >
                           {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                          title={trade.gasPriceGwei ? `${trade.gasPriceGwei} gwei effective gas price` : "Gas price unavailable"}
+                        >
+                          {trade.gasPriceGwei ? `${trade.gasPriceGwei} gwei` : "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                          title={
+                            trade.gasFeeTotalEth
+                              ? `${trade.gasFeeTotalEth} ETH spent on gas through this transaction (unique txs only)`
+                              : "Gas fee total unavailable"
+                          }
+                        >
+                          {trade.gasFeeTotalEth ? `${trade.gasFeeTotalEth} ETH` : "—"}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           {trade.maker ? (
@@ -2222,7 +2242,7 @@ export function Exporter() {
           <p className="text-xs leading-5 text-muted-foreground">
             Amounts come from the pool’s on-chain Swap, Mint (ADD) and Burn (REMOVE) events; for ADD and REMOVE the two amounts are the tokens deposited or withdrawn and Total is the quote-token side in USD. USD totals multiply the quote token by its historical price from DefiLlama. The {pool.baseSymbol} column is a whole number of tokens; hover a cell for the exact amount. The CSV keeps the full on-chain value.
             The CSV includes every row that matches the filters, not only the current page
-            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers. The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
+            {filter !== "ALL" || funder || query.trim() ? " after filters" : ""}. Dates in the table use the time zone selected above; the file has both the UTC time and the time in that zone. Pool columns show how much of each token the pool held right after that swap (hover for the exact value); for Uniswap V3 style pools this is the balance at the end of the swap’s block. Holders is the exact number of wallets with a non-zero base-token balance right after that trade, rebuilt from on-chain transfers. Gas Fee is that transaction’s effective gas price in gwei; Gas Fee Total is the running ETH cost of unique transactions from the oldest loaded trade through this row (4 decimals). The number next to a maker is how many transactions that wallet made in this pool. Hover it for that wallet’s buys, sells, realized PnL, and tokens still held, in USD, the quote token, and the base token. Click it to show only that wallet. Maker sorts that column by address, and Txns sorts it by the number. The Bot icon marks transactions sent straight to the pool or through a contract with unpublished source; the Team icon marks the token deployer and the wallet that added the first liquidity. Funded by is the address that first sent native currency to the maker. Each maker and transaction links to the explorer. Supported chains: {CHAINS}.
           </p>
         </section>
       ) : phase === "idle" || phase === "error" ? (
@@ -2293,6 +2313,8 @@ function isMissing(trade: Trade, key: SortKey): boolean {
   if (key === "selected" || key === "others" || key === "makerTxCount" || key === "txNo") return false
   if (key === "fundedBy") return !trade.fundedBy
   if (key === "holders") return trade.holders === null
+  if (key === "gasPriceGwei") return trade.gasPriceGwei === null
+  if (key === "gasFeeTotalEth") return trade.gasFeeTotalEth === null
   if (key === "maker") return !trade.maker
   if (key === "timestamp" || key === "type") return false
   return trade[key] === null

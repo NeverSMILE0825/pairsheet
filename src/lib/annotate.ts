@@ -1,3 +1,4 @@
+import { assignGasFeeTotals } from "./gas-fees"
 import { normalizeAddress } from "./format"
 import type { ContractInfo } from "./wallets"
 import type { MakerTag, Trade } from "./types"
@@ -56,7 +57,7 @@ export function annotateTrades(trades: Trade[], poolAddress: string, facts: Wall
     if (maker && teamWallets.has(maker)) tags.push("team")
     return { ...trade, makerTxCount: counts.get(maker) ?? 0, makerTags: tags }
   })
-  return assignTxNumbers(tagged)
+  return assignGasFeeTotals(assignTxNumbers(tagged))
 }
 
 /** Oldest loaded trade is 1; same-block ties break on log index. Numbers stay with the row when sorting. */

@@ -373,6 +373,9 @@ export function decodeSolanaSwap(pool: PoolContext, signature: string, tx: Solan
     txHash: signature,
     fundedBy: null,
     fundedByAddress: null,
+    gasPriceGwei: null,
+    gasFeeWei: null,
+    gasFeeTotalEth: null,
   }
 }
 

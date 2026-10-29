@@ -1,3 +1,4 @@
+import { ethFromWei } from "./gas-fees"
 import { formatZoned } from "./timezone"
 import type { PoolView, Trade } from "./types"
 
@@ -24,6 +25,9 @@ const HEADERS = [
   "tx_to",
   "funded_by",
   "funded_by_address",
+  "gas_price_gwei",
+  "gas_fee_eth",
+  "gas_fee_total_eth",
   "tx_hash",
   "block_number",
   "log_index",
@@ -65,6 +69,9 @@ export function tradesToCsv(pool: PoolView, trades: Trade[], timeZone = "UTC"): 
         trade.router,
         trade.fundedBy,
         trade.fundedByAddress,
+        trade.gasPriceGwei,
+        trade.gasFeeWei && /^\d+$/.test(trade.gasFeeWei) ? ethFromWei(BigInt(trade.gasFeeWei)) : null,
+        trade.gasFeeTotalEth,
         trade.txHash,
         trade.blockNumber,
         trade.logIndex,

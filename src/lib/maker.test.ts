@@ -32,6 +32,9 @@ function trade(partial: Partial<Trade> & Pick<Trade, "type" | "maker">): Trade {
     txHash: "0x1",
     fundedBy: null,
     fundedByAddress: null,
+    gasPriceGwei: null,
+    gasFeeWei: null,
+    gasFeeTotalEth: null,
     ...partial,
   }
 }

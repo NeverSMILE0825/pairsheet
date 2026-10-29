@@ -320,6 +320,9 @@ test("writes an excel-friendly csv", () => {
     txHash: "0xabc,def",
     fundedBy: "Disperse.app",
     fundedByAddress: "0xd152f549545093347a162dce210e7293f1452150",
+    gasPriceGwei: "12.5",
+    gasFeeWei: "250000000000000",
+    gasFeeTotalEth: "0.0003",
   }
   const csv = tradesToCsv(view, [trade], "Asia/Seoul")
   assert.equal(csv.startsWith("\uFEFF"), true)
@@ -329,7 +332,7 @@ test("writes an excel-friendly csv", () => {
   assert.match(csv, /4\.45892281616295148,1234\.5,0\.0000099,1284,0x591f/)
   assert.match(csv, /,40,bot;team,0x7a250d56/)
   assert.match(csv, /"0xabc,def"/)
-  assert.match(csv, /Disperse\.app,0xd152f549545093347a162dce210e7293f1452150/)
+  assert.match(csv, /Disperse\.app,0xd152f549545093347a162dce210e7293f1452150,12\.5,0\.00025,0\.0003/)
   assert.equal(csvFilename(view), "fwog-weth-ether-swaps.csv")
 })
 
@@ -508,6 +511,9 @@ test("counts wallet transactions and tags bots and team wallets", () => {
     fundedBy: null,
     fundedByAddress: null,
     txHash: "0x1",
+    gasPriceGwei: null,
+    gasFeeWei: null,
+    gasFeeTotalEth: null,
   }
   const lp = "0x1111111111111111111111111111111111111111"
   const dev = "0x2222222222222222222222222222222222222222"
@@ -563,6 +569,9 @@ test("numbers transactions oldest-first and keeps them when reordered", () => {
     fundedBy: null,
     fundedByAddress: null,
     txHash: "0x1",
+    gasPriceGwei: null,
+    gasFeeWei: null,
+    gasFeeTotalEth: null,
   }
   const newestFirst = [
     { ...base, id: "new", txNo: 0, blockNumber: 30, logIndex: 2 },

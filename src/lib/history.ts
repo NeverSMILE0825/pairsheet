@@ -2,6 +2,7 @@ import { decodeBase64Url, encodeBase64Url } from "./bytes"
 import { chainCanExport, type ChainConfig } from "./chains"
 import { amountsFromV4Receipt, decodeSwap, liquidityTopics, topicOrder } from "./decode"
 import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
+import { applyGasFees, parseReceiptGas, type ReceiptGas } from "./gas-fees"
 import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
 import { resolvePool } from "./pool"
@@ -323,18 +324,9 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
   })
   if (decoded.length === 0) return []
 
-  const liquidityHashes =
-    pool.style === "v4"
-      ? [
-          ...new Set(
-            decoded
-              .filter((row) => row.swap.type === "ADD" || row.swap.type === "REMOVE")
-              .map((row) => row.log.txHash.toLowerCase()),
-          ),
-        ]
-      : []
+  const allHashes = [...new Set(decoded.map((row) => row.log.txHash.toLowerCase()))]
 
-  const [makers, prices, sizes, liquidityReceipts] = await Promise.all([
+  const [makers, prices, sizes, receipts] = await Promise.all([
     resolveMakers(
       chain,
       decoded.map((row) => row.log.txHash),
@@ -351,14 +343,20 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       pool,
       decoded.map((row) => row.log),
     ).catch(() => new Map<string, PoolSize>()),
-    loadReceiptLogs(chain, liquidityHashes),
+    loadReceipts(chain, allHashes),
   ])
 
+  const gasByTx = new Map<string, ReceiptGas>()
+  for (const [hash, receipt] of receipts) {
+    const gas = parseReceiptGas(receipt.raw)
+    if (gas) gasByTx.set(hash, gas)
+  }
+
   const trades = decoded.map(({ log, swap }) => {
-    const receiptLogs = liquidityReceipts.get(log.txHash.toLowerCase())
+    const receipt = receipts.get(log.txHash.toLowerCase())
     const filled =
-      (swap.type === "ADD" || swap.type === "REMOVE") && receiptLogs
-        ? { ...swap, ...amountsFromV4Receipt(pool, swap.type, receiptLogs) }
+      (swap.type === "ADD" || swap.type === "REMOVE") && receipt?.logs
+        ? { ...swap, ...amountsFromV4Receipt(pool, swap.type, receipt.logs) }
         : swap
     const quotePrice = prices.get(log.timestamp) ?? null
     const size = sizes.get(`${log.txHash.toLowerCase()}-${log.logIndex}`)
@@ -399,6 +397,9 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       txHash: log.txHash,
       fundedBy: null,
       fundedByAddress: null,
+      gasPriceGwei: null,
+      gasFeeWei: null,
+      gasFeeTotalEth: null,
     }
     return trade
   })
@@ -407,14 +408,16 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
     if (a.blockNumber !== b.blockNumber) return b.blockNumber - a.blockNumber
     return b.logIndex - a.logIndex
   })
-  return trades
+  return applyGasFees(trades, gasByTx)
 }
 
-async function loadReceiptLogs(
-  chain: ChainConfig,
-  hashes: string[],
-): Promise<Map<string, { address?: string; topics?: string[]; data?: string }[]>> {
-  const receipts = new Map<string, { address?: string; topics?: string[]; data?: string }[]>()
+type LoadedReceipt = {
+  raw: unknown
+  logs: { address?: string; topics?: string[]; data?: string }[]
+}
+
+async function loadReceipts(chain: ChainConfig, hashes: string[]): Promise<Map<string, LoadedReceipt>> {
+  const receipts = new Map<string, LoadedReceipt>()
   if (hashes.length === 0 || chain.rpcs.length === 0) return receipts
   const batches: string[][] = []
   for (let index = 0; index < hashes.length; index += 20) batches.push(hashes.slice(index, index + 20))
@@ -427,9 +430,9 @@ async function loadReceiptLogs(
         )
         results.forEach((receipt, id) => {
           const hash = batch[id]
-          const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] } | undefined)?.logs
-          if (!hash || !Array.isArray(logs)) return
-          receipts.set(hash, logs)
+          if (!hash || !receipt || typeof receipt !== "object") return
+          const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] }).logs
+          receipts.set(hash, { raw: receipt, logs: Array.isArray(logs) ? logs : [] })
         })
         if (batch.every((hash) => receipts.has(hash))) return
       } catch {

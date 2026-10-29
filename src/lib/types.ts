@@ -80,6 +80,12 @@ export type Trade = {
   txHash: string
   fundedBy: string | null
   fundedByAddress: string | null
+  /** Effective gas price for this tx (gwei). Null on Solana / when receipt missing. */
+  gasPriceGwei: string | null
+  /** Exact fee for this tx in wei (string). Shared across rows with the same txHash. */
+  gasFeeWei: string | null
+  /** Running sum of unique tx fees from the oldest loaded trade through this row (ETH, 4 dp). */
+  gasFeeTotalEth: string | null
 }
 
 export type SwapsResponse = {
