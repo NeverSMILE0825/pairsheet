@@ -1,7 +1,9 @@
+import { mapPool, rpcBatch } from "./http"
 import type { Trade } from "./types"
 
 const GWEI = 10n ** 9n
 const ETH = 10n ** 18n
+const CANONICAL_GWEI = /^\d+\.\d{3}$/
 
 export type ReceiptGas = {
   gasUsed: bigint
@@ -124,4 +126,106 @@ export function ethFromWei(wei: bigint): string {
   const frac = wei % ETH
   if (frac === 0n) return whole.toString()
   return `${whole.toString()}.${frac.toString().padStart(18, "0").replace(/0+$/, "")}`
+}
+
+export function isCanonicalGasPrice(value: string | null | undefined): boolean {
+  return typeof value === "string" && CANONICAL_GWEI.test(value)
+}
+
+/** Normalize a stored gwei string to exactly 3 decimals. */
+export function normalizeGasPriceString(raw: string): string | null {
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value < 0) return null
+  return value.toFixed(3)
+}
+
+export function tradeNeedsGasFetch(trade: Trade): boolean {
+  return !trade.gasPriceGwei || !trade.gasFeeWei
+}
+
+export function tradesNeedGasRepair(trades: Trade[]): boolean {
+  return trades.some(
+    (trade) =>
+      tradeNeedsGasFetch(trade) ||
+      !isCanonicalGasPrice(trade.gasPriceGwei) ||
+      (Boolean(trade.gasFeeWei) && !trade.gasFeeTotalEth),
+  )
+}
+
+/** Fix gwei formatting on already-saved trades (no RPC). */
+export function normalizeTradeGasFormats(trades: Trade[]): { trades: Trade[]; changed: boolean } {
+  let changed = false
+  const next = trades.map((trade) => {
+    if (!trade.gasPriceGwei || isCanonicalGasPrice(trade.gasPriceGwei)) return trade
+    const normalized = normalizeGasPriceString(trade.gasPriceGwei)
+    if (!normalized || normalized === trade.gasPriceGwei) return trade
+    changed = true
+    return { ...trade, gasPriceGwei: normalized }
+  })
+  return { trades: next, changed }
+}
+
+export async function fetchReceiptGasMap(
+  rpcs: string[],
+  hashes: string[],
+): Promise<Map<string, ReceiptGas>> {
+  const out = new Map<string, ReceiptGas>()
+  const unique = [...new Set(hashes.map((hash) => hash.toLowerCase()).filter(Boolean))]
+  if (unique.length === 0 || rpcs.length === 0) return out
+  const batches: string[][] = []
+  for (let index = 0; index < unique.length; index += 20) batches.push(unique.slice(index, index + 20))
+  await mapPool(batches, 4, async (batch) => {
+    for (const rpc of rpcs) {
+      try {
+        const results = await rpcBatch(
+          rpc,
+          batch.map((hash) => ({ method: "eth_getTransactionReceipt", params: [hash] })),
+        )
+        results.forEach((receipt, id) => {
+          const hash = batch[id]
+          const gas = parseReceiptGas(receipt)
+          if (hash && gas) out.set(hash, gas)
+        })
+        if (batch.every((hash) => out.has(hash))) return
+      } catch {
+        continue
+      }
+    }
+  })
+  return out
+}
+
+/**
+ * Repair empty / non-canonical gas fields on a loaded tape.
+ * Fetches receipts only for trades missing price or fee wei.
+ */
+export async function repairTradeGas(
+  trades: Trade[],
+  rpcs: string[] | null,
+): Promise<{ trades: Trade[]; changed: boolean; fetched: number }> {
+  const formatted = normalizeTradeGasFormats(trades)
+  let next = formatted.trades
+  let changed = formatted.changed
+  let fetched = 0
+
+  const missing = next.filter(tradeNeedsGasFetch)
+  if (rpcs && rpcs.length > 0 && missing.length > 0) {
+    const map = await fetchReceiptGasMap(
+      rpcs,
+      missing.map((trade) => trade.txHash),
+    )
+    fetched = map.size
+    if (map.size > 0) {
+      next = applyGasFees(next, map)
+      changed = true
+    }
+  }
+
+  if (changed || next.some((trade) => trade.gasFeeWei && !trade.gasFeeTotalEth)) {
+    next = assignGasFeeTotals(next)
+    changed = true
+  }
+
+  const polished = normalizeTradeGasFormats(next)
+  return { trades: polished.trades, changed: changed || polished.changed, fetched }
 }

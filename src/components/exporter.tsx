@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getChain } from "@/lib/chains"
+import { repairTradeGas, tradesNeedGasRepair } from "@/lib/gas-fees"
 import {
   DA_COLUMN_DEFS,
   TX_COLUMN_DEFS,
@@ -255,6 +256,8 @@ export function Exporter() {
   const [localSavedIds, setLocalSavedIds] = useState<Set<string>>(() => new Set())
   const [saveBusy, setSaveBusy] = useState(false)
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const [saveNoticeTone, setSaveNoticeTone] = useState<"ok" | "error" | "info">("info")
+  const [gasSavePrompt, setGasSavePrompt] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
@@ -478,6 +481,8 @@ export function Exporter() {
     setPage(0)
     setTableView("transactions")
     setSaveNotice(null)
+    setSaveNoticeTone("info")
+    setGasSavePrompt(false)
   }
 
   async function load(target = url) {
@@ -915,6 +920,11 @@ export function Exporter() {
     window.setTimeout(() => setCopied(false), 1200)
   }
 
+  function flashNotice(message: string, tone: "ok" | "error" | "info" = "info") {
+    setSaveNoticeTone(tone)
+    setSaveNotice(message)
+  }
+
   async function persistAnalysis() {
     if (!pool || rawTrades.length === 0) return
     setSaveBusy(true)
@@ -934,18 +944,21 @@ export function Exporter() {
       if (hasSyncToken()) {
         const catalog = await publishMergedBookmarks(local)
         setSyncStatus(getSyncStatus())
-        setSaveNotice(
+        flashNotice(
           `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced ${catalog.bookmarks.length} pair(s) to every browser.`,
+          "ok",
         )
       } else {
         await refreshSavedList()
         setSyncStatus(getSyncStatus())
-        setSaveNotice(
+        flashNotice(
           `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open → Enable sync (or Export) to use it on Edge / other PCs.`,
+          "ok",
         )
       }
+      setGasSavePrompt(false)
     } catch (saveError) {
-      setSaveNotice(saveError instanceof Error ? saveError.message : "Could not save this analysis.")
+      flashNotice(saveError instanceof Error ? saveError.message : "Could not save this analysis.", "error")
     } finally {
       setSaveBusy(false)
     }
@@ -953,8 +966,10 @@ export function Exporter() {
 
   async function openSaved(id: string) {
     setSavedOpen(false)
+    setGasSavePrompt(false)
     const meta = savedList.find((item) => item.id === id)
     run.current += 1
+    const token = run.current
     setPhase("loading")
     resetViewState()
     setProgress("Opening saved analysis…")
@@ -963,18 +978,43 @@ export function Exporter() {
       if (saved) {
         setUrl(saved.url)
         setPool(saved.pool)
-        setTrades(saved.trades)
         setFacts(saved.facts)
         setWarning(saved.warning)
         setCapped(saved.capped)
+        let trades = saved.trades
+        let repaired = false
+        if (tradesNeedGasRepair(trades)) {
+          setProgress("Refreshing gas fees for this saved tape…")
+          const chain = getChain(saved.pool.chainId)
+          const rpcs = chain && chain.id !== "solana" ? chain.rpcs : null
+          const result = await repairTradeGas(trades, rpcs)
+          if (run.current !== token) return
+          trades = result.trades
+          repaired = result.changed
+        }
+        setTrades(trades)
         setPhase("done")
         setProgress("")
-        setSaveNotice(`Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`)
+        if (repaired) {
+          flashNotice(
+            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and refreshed gas fee columns.`,
+            "info",
+          )
+          setGasSavePrompt(true)
+        } else {
+          flashNotice(
+            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`,
+            "ok",
+          )
+        }
         return
       }
       if (!meta?.url) throw new Error("That saved analysis is no longer available.")
       setUrl(meta.url)
-      setSaveNotice(`Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)…`)
+      flashNotice(
+        `Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)…`,
+        "info",
+      )
       await load(meta.url)
     } catch (openError) {
       setPhase("error")
@@ -983,28 +1023,47 @@ export function Exporter() {
   }
 
   async function removeSaved(id: string) {
+    const meta = savedList.find((item) => item.id === id)
+    const label = meta ? `${meta.baseSymbol} / ${meta.quoteSymbol}` : "saved pair"
     try {
       const wasLocal = localSavedIds.has(id)
       await deleteSavedAnalysis(id)
       const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       if (hasSyncToken()) {
-        const remote = await fetchRemoteBookmarks()
-        const merged = mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id)
-        await publishBookmarks(merged, undefined, { allowEmpty: true })
-        setSavedList(merged)
-        setSyncStatus(getSyncStatus())
-        setSaveNotice("Removed this pair from this browser and the shared list.")
-        return
+        try {
+          const remote = await fetchRemoteBookmarks()
+          const merged = mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id)
+          await publishBookmarks(merged, undefined, { allowEmpty: true })
+          setSavedList(merged)
+          setSyncStatus(getSyncStatus())
+          flashNotice(`Deleted ${label} from this browser and the shared list.`, "ok")
+          return
+        } catch (syncError) {
+          await refreshSavedList()
+          flashNotice(
+            `Deleted ${label} on this browser, but shared-list sync failed: ${
+              syncError instanceof Error ? syncError.message : "unknown error"
+            }`,
+            "error",
+          )
+          return
+        }
       }
       await refreshSavedList()
       if (!wasLocal) {
-        setSaveNotice("That pair is on the shared list. Enable sync to remove it for every browser.")
+        flashNotice(
+          `${label} is only on the shared list. Enable sync to remove it for every browser.`,
+          "info",
+        )
       } else {
-        setSaveNotice("Removed the local snapshot on this browser.")
+        flashNotice(`Deleted ${label} from this browser.`, "ok")
       }
-    } catch {
-      setSaveNotice("Could not delete that saved analysis.")
+    } catch (error) {
+      flashNotice(
+        `Could not delete ${label}: ${error instanceof Error ? error.message : "unknown error"}`,
+        "error",
+      )
     }
   }
 
@@ -1041,9 +1100,9 @@ export function Exporter() {
       anchor.download = `pairsheet-saved-pairs-${new Date().toISOString().slice(0, 10)}.json`
       anchor.click()
       URL.revokeObjectURL(href)
-      setSaveNotice(`Exported ${vault.payloads.length.toLocaleString("en-US")} saved pair${vault.payloads.length === 1 ? "" : "s"}.`)
+      flashNotice(`Exported ${vault.payloads.length.toLocaleString("en-US")} saved pair${vault.payloads.length === 1 ? "" : "s"}.`, "ok")
     } catch (error) {
-      setSaveNotice(error instanceof Error ? error.message : "Could not export saved pairs.")
+      flashNotice(error instanceof Error ? error.message : "Could not export saved pairs.", "error")
     }
   }
 
@@ -1057,9 +1116,9 @@ export function Exporter() {
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       if (hasSyncToken()) await publishMergedBookmarks(local)
       else await refreshSavedList()
-      setSaveNotice(`Imported ${count.toLocaleString("en-US")} saved pair${count === 1 ? "" : "s"} into this browser.`)
+      flashNotice(`Imported ${count.toLocaleString("en-US")} saved pair${count === 1 ? "" : "s"} into this browser.`, "ok")
     } catch (error) {
-      setSaveNotice(error instanceof Error ? error.message : "Could not import that file.")
+      flashNotice(error instanceof Error ? error.message : "Could not import that file.", "error")
     } finally {
       if (importFileRef.current) importFileRef.current.value = ""
     }
@@ -1095,13 +1154,13 @@ export function Exporter() {
       setSyncStatus(status)
       if (!isSyncSuccessful(status) || catalog.bookmarks.length === 0) {
         setSyncMessage("Token saved, but the shared list is still empty. Click Publish now after saving pairs here.")
-        setSaveNotice("Token saved. Publish again once this browser has saved pairs.")
+        flashNotice("Token saved. Publish again once this browser has saved pairs.", "info")
         return
       }
       setSyncMessage(
         `Synced ${catalog.bookmarks.length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
       )
-      setSaveNotice(`Cloud sync is on · ${catalog.bookmarks.length} pair(s) on the shared list.`)
+      flashNotice(`Cloud sync is on · ${catalog.bookmarks.length} pair(s) on the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
@@ -1130,7 +1189,7 @@ export function Exporter() {
         return
       }
       setSyncMessage(`Synced · ${catalog.bookmarks.length} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
-      setSaveNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`)
+      flashNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
@@ -1361,7 +1420,7 @@ export function Exporter() {
                         setSyncEnabled(false)
                         setSyncStatus(getSyncStatus())
                         setSyncMessage("Cloud sync turned off on this browser.")
-                        setSaveNotice("Cloud sync turned off on this browser.")
+                        flashNotice("Cloud sync turned off on this browser.", "info")
                       }}
                     >
                       Disconnect
@@ -1443,9 +1502,52 @@ export function Exporter() {
       ) : null}
 
       {saveNotice ? (
-        <p className="text-sm text-muted-foreground" role="status">
+        <p
+          className={`rounded-xl px-4 py-3 text-sm ring-1 ${
+            saveNoticeTone === "ok"
+              ? "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30"
+              : saveNoticeTone === "error"
+                ? "bg-rose-500/10 text-rose-300 ring-rose-500/30"
+                : "bg-muted/60 text-muted-foreground ring-foreground/10"
+          }`}
+          role="status"
+        >
           {saveNotice}
         </p>
+      ) : null}
+
+      {gasSavePrompt ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setGasSavePrompt(false)
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gas-save-title"
+            className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl ring-1 ring-foreground/10"
+          >
+            <h2 id="gas-save-title" className="text-base font-semibold tracking-tight">
+              Save updated gas fees?
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This saved tape had missing or outdated gas columns. Pair Sheet recalculated them
+              {pool ? ` for ${pool.baseSymbol} / ${pool.quoteSymbol}` : ""}. Save the updated analysis on this browser?
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setGasSavePrompt(false)}>
+                Not now
+              </Button>
+              <Button type="button" disabled={saveBusy || !pool || rawTrades.length === 0} onClick={() => void persistAnalysis()}>
+                {saveBusy ? <Loader2 className="animate-spin" /> : null}
+                Save updated analysis
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {phase === "loading" ? (

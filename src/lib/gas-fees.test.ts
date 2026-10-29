@@ -5,7 +5,10 @@ import {
   assignGasFeeTotals,
   formatEth4,
   formatGasPriceGwei,
+  normalizeGasPriceString,
+  normalizeTradeGasFormats,
   parseReceiptGas,
+  tradesNeedGasRepair,
 } from "./gas-fees"
 import type { Trade } from "./types"
 
@@ -83,4 +86,24 @@ test("assignGasFeeTotals keeps running sum across the full tape", () => {
   const byId = Object.fromEntries(numbered.map((row) => [row.id, row.gasFeeTotalEth]))
   assert.equal(byId.old, "0.0010")
   assert.equal(byId.new, "0.0020")
+})
+
+test("normalizes legacy gas price strings to 3 decimals", () => {
+  assert.equal(normalizeGasPriceString("0.05605884"), "0.056")
+  assert.equal(normalizeGasPriceString("12.5"), "12.500")
+  const legacy = [
+    trade({
+      id: "a",
+      txHash: "0xaa",
+      blockNumber: 1,
+      logIndex: 0,
+      gasPriceGwei: "0.05605884",
+      gasFeeWei: "1000",
+      gasFeeTotalEth: "0.0001",
+    }),
+  ]
+  assert.equal(tradesNeedGasRepair(legacy), true)
+  const fixed = normalizeTradeGasFormats(legacy)
+  assert.equal(fixed.changed, true)
+  assert.equal(fixed.trades[0].gasPriceGwei, "0.056")
 })

@@ -44,6 +44,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Pool columns are the pool balances right after that event (hover for the exact value).",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded).",
       "Gas Fee = that transaction’s effective gas price in gwei (3 decimals). Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
+      "Opening an older saved tape recalculates missing or non-3-decimal gas columns and asks whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
       "Funded by is the address that first sent native currency into the maker.",
     ],
