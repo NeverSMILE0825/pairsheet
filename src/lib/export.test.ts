@@ -8,11 +8,14 @@ import {
   INIT_V4_TOPIC,
   MODIFY_LIQUIDITY_V4_TOPIC,
   SWAP_V4_TOPIC,
+  amountsFromV4Receipt,
   decodeAbiString,
   decodeSwap,
   decodeV2,
   decodeV3,
   liquidityTopics,
+  priceQuoteFromV4InitData,
+  priceQuoteFromV4SqrtPrice,
   topicOrder,
 } from "./decode"
 import {
@@ -258,6 +261,55 @@ test("decodes uniswap v4 swaps with caller BalanceDelta signs (opposite of v3)",
     v4Pool,
   )
   assert.deepEqual(add, { type: "ADD", baseRaw: 0n, quoteRaw: 0n })
+})
+
+test("V4 init price and one-sided ADD amounts match DEXTools-style values", () => {
+  const poolId = "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96"
+  const manager = "0x000000000004444c5dc75cb358380d2e3de08a90"
+  const ginnan = "0xf2fe457d03302ea6c3b1f23038adeea88aeb0761"
+  const v4Pool: PoolContext = {
+    ...pool,
+    address: poolId,
+    logAddress: manager,
+    topic1: poolId,
+    style: "v4",
+    dex: "Uniswap V4 (Ethereum)",
+    dexId: "uniswap-v4-ethereum",
+    base: { address: ginnan, symbol: "GINNAN", decimals: 18 },
+    quote: { address: "0x0000000000000000000000000000000000000000", symbol: "ETH", decimals: 18 },
+    token0: "0x0000000000000000000000000000000000000000",
+    token1: ginnan,
+  }
+  // sqrtPriceX96 such that token1/token0 = 1e9 (1 ETH = 1B GINNAN)
+  const sqrtPriceX96 = 2505414483750479311864138015696063n
+  const price = priceQuoteFromV4SqrtPrice(sqrtPriceX96, v4Pool)
+  assert.ok(price)
+  assert.equal(Number(price), 1e-9)
+
+  const initData = `0x${"0".repeat(64)}${encodeInt(60n)}${"0".repeat(64)}${encodeInt(sqrtPriceX96)}${encodeInt(207243n)}`
+  assert.equal(priceQuoteFromV4InitData(initData, v4Pool), price)
+
+  const transfer =
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+  const pad = (address: string) => `0x${"0".repeat(24)}${address.slice(2)}`
+  const amount = 999999999999999999999946798n
+  const amounts = amountsFromV4Receipt(v4Pool, "ADD", [
+    {
+      address: ginnan,
+      topics: [transfer, pad("0x0000000000000000000000000000000000000000"), pad("0x5c4b3436d963c34b16acbc0e8274e84f8d522a46")],
+      data: `0x${amount.toString(16).padStart(64, "0")}`,
+    },
+    {
+      address: ginnan,
+      topics: [transfer, pad("0x5c4b3436d963c34b16acbc0e8274e84f8d522a46"), pad(manager)],
+      data: `0x${amount.toString(16).padStart(64, "0")}`,
+    },
+  ])
+  // Mint to intermediate is ignored; only PoolManager inflow counts (~1B tokens).
+  assert.equal(amounts.baseRaw, amount)
+  assert.equal(amounts.quoteRaw, 0n)
+  assert.ok(Number(amounts.baseRaw) / 1e18 > 999_999_999)
+  assert.ok(Number(amounts.baseRaw) / 1e18 < 1_000_000_001)
 })
 
 test("decodes a token symbol from ABI data", () => {

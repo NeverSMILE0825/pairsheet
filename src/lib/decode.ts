@@ -1,5 +1,8 @@
 import { hexToUtf8 } from "./bytes"
+import { formatScaled } from "./format"
 import type { PoolContext, RawLog, Side } from "./types"
+
+const Q96 = 1n << 96n
 
 export const SWAP_V2_TOPIC =
   "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"
@@ -210,6 +213,48 @@ export function decodeAbiString(hex: string): string {
   return hexToUtf8(data)
 }
 
+/**
+ * Quote-token price of one base token from Uniswap V4 sqrtPriceX96.
+ * token1/token0 = (sqrtPriceX96 / 2^96)^2; oriented to pool.base / pool.quote.
+ */
+export function priceQuoteFromV4SqrtPrice(
+  sqrtPriceX96: bigint,
+  pool: PoolContext,
+  places = 18,
+): string | null {
+  if (sqrtPriceX96 === 0n) return null
+  const scale = 10n ** BigInt(places)
+  const baseIs0 = sameAddress(pool.token0, pool.base.address)
+  const scaled = baseIs0
+    ? (sqrtPriceX96 * sqrtPriceX96 * scale) / (Q96 * Q96)
+    : (Q96 * Q96 * scale) / (sqrtPriceX96 * sqrtPriceX96)
+  return formatScaled(scaled, places)
+}
+
+/** Initialize log data: fee, tickSpacing, hooks, sqrtPriceX96, tick. */
+export function priceQuoteFromV4InitData(data: string, pool: PoolContext): string | null {
+  try {
+    return priceQuoteFromV4SqrtPrice(decodeWord(data, 3), pool)
+  } catch {
+    return null
+  }
+}
+
+/** Find Initialize for this pool inside a receipt (same tx as the first ADD). */
+export function priceQuoteFromV4InitLogs(
+  pool: PoolContext,
+  receiptLogs: { topics?: string[]; data?: string }[],
+): string | null {
+  const poolId = (pool.topic1 || "").toLowerCase()
+  for (const log of receiptLogs) {
+    if (!Array.isArray(log.topics) || typeof log.data !== "string") continue
+    if ((log.topics[0] || "").toLowerCase() !== INIT_V4_TOPIC) continue
+    if (poolId && (log.topics[1] || "").toLowerCase() !== poolId) continue
+    return priceQuoteFromV4InitData(log.data, pool)
+  }
+  return null
+}
+
 /** Sum ERC-20 transfers of base/quote to or from the V4 PoolManager in a receipt. */
 export function amountsFromV4Receipt(
   pool: PoolContext,
@@ -221,8 +266,6 @@ export function amountsFromV4Receipt(
   const manager = pool.logAddress.toLowerCase()
   const base = pool.base.address.toLowerCase()
   const quote = pool.quote.address.toLowerCase()
-  const nativeQuote = sameAddress(pool.quote.address, "0x0000000000000000000000000000000000000000")
-  const nativeBase = sameAddress(pool.base.address, "0x0000000000000000000000000000000000000000")
 
   for (const log of receiptLogs) {
     if (!log.address || !Array.isArray(log.topics) || log.topics.length < 3 || typeof log.data !== "string") continue
@@ -246,8 +289,6 @@ export function amountsFromV4Receipt(
     if (token === quote) quoteRaw += amount
   }
 
-  // Native currency has no ERC-20 Transfer; leave 0 (matches DEXTools for ETH-sided adds).
-  if (nativeBase) baseRaw = baseRaw
-  if (nativeQuote) quoteRaw = quoteRaw
+  // Native currency has no ERC-20 Transfer — leave 0 (DEXTools shows 0 ETH on one-sided adds).
   return { baseRaw, quoteRaw }
 }

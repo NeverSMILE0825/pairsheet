@@ -1,7 +1,21 @@
 import { decodeBase64Url, encodeBase64Url } from "./bytes"
 import { chainCanExport, type ChainConfig } from "./chains"
-import { amountsFromV4Receipt, decodeSwap, liquidityTopics, topicOrder } from "./decode"
-import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
+import {
+  amountsFromV4Receipt,
+  decodeSwap,
+  liquidityTopics,
+  priceQuoteFromV4InitData,
+  priceQuoteFromV4InitLogs,
+  topicOrder,
+} from "./decode"
+import {
+  formatUnits,
+  marketCapFromPrice,
+  mulDecimals,
+  priceInQuote,
+  priceUsdFromTotal,
+  totalUsd,
+} from "./format"
 import { applyGasFees, fetchEthReceipts, parseReceiptGas, type ReceiptGas } from "./gas-fees"
 import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
@@ -326,6 +340,73 @@ function blockscoutLog(item: Record<string, unknown>, topic: string): RawLog | n
   }
 }
 
+type DecodedAmounts = { type: Trade["type"]; baseRaw: bigint; quoteRaw: bigint }
+
+/**
+ * Price / total for INIT and ADD/REMOVE.
+ * DEXTools: INIT shows unit price from sqrtPrice (Total —); one-sided V4 ADD
+ * (native ETH has no ERC-20 Transfer) values Total as base × that init price.
+ */
+function valueLiquidityTrade(
+  pool: PoolContext,
+  filled: DecodedAmounts,
+  log: RawLog,
+  receiptLogs: { topics?: string[]; data?: string }[] | null,
+  baseAmount: string,
+  quotePrice: number | null,
+): { priceQuote: string | null; priceUsd: string | null; totalUsd: string | null } {
+  if (filled.type === "INIT") {
+    const priceQuote = priceQuoteFromV4InitData(log.data, pool)
+    const priceUsd =
+      priceQuote && quotePrice != null ? mulDecimals(priceQuote, quotePriceToString(quotePrice)) : null
+    return { priceQuote, priceUsd, totalUsd: null }
+  }
+
+  if (filled.type === "ADD" || filled.type === "REMOVE") {
+    const bothSides = filled.baseRaw > 0n && filled.quoteRaw > 0n
+    const initPriceQuote =
+      !bothSides && receiptLogs ? priceQuoteFromV4InitLogs(pool, receiptLogs) : null
+    let total: string | null = null
+    if (quotePrice != null) {
+      if (filled.quoteRaw > 0n) {
+        total = totalUsd(filled.quoteRaw, pool.quote.decimals, quotePrice)
+      } else if (filled.baseRaw > 0n && initPriceQuote) {
+        const unitUsd = mulDecimals(initPriceQuote, quotePriceToString(quotePrice))
+        total = unitUsd ? mulDecimals(baseAmount, unitUsd) : null
+      }
+    }
+    if (total === "0" && filled.baseRaw === 0n && filled.quoteRaw === 0n) total = null
+    return {
+      priceQuote: bothSides
+        ? priceInQuote(filled.quoteRaw, pool.quote.decimals, filled.baseRaw, pool.base.decimals)
+        : null,
+      priceUsd: bothSides && total ? priceUsdFromTotal(total, baseAmount) : null,
+      totalUsd: total,
+    }
+  }
+
+  const priceQuote = priceInQuote(
+    filled.quoteRaw,
+    pool.quote.decimals,
+    filled.baseRaw,
+    pool.base.decimals,
+  )
+  const oneSided = filled.baseRaw === 0n || filled.quoteRaw === 0n
+  const total =
+    quotePrice === null ? null : totalUsd(filled.quoteRaw, pool.quote.decimals, quotePrice)
+  const priceUsd = total && !oneSided ? priceUsdFromTotal(total, baseAmount) : null
+  return {
+    priceQuote: oneSided ? null : priceQuote,
+    priceUsd,
+    totalUsd: total,
+  }
+}
+
+function quotePriceToString(price: number): string {
+  if (!Number.isFinite(price) || price < 0) return "0"
+  return price.toFixed(18).replace(/\.?0+$/, "") || "0"
+}
+
 async function hydrate(
   chain: ChainConfig,
   pool: PoolContext,
@@ -383,25 +464,14 @@ async function hydrate(
   const trades = decoded.map(({ log, swap }) => {
     const receipt = receipts.get(log.txHash.toLowerCase())
     const filled =
-      (swap.type === "ADD" || swap.type === "REMOVE") && receipt?.logs
+      pool.style === "v4" && (swap.type === "ADD" || swap.type === "REMOVE") && receipt?.logs
         ? { ...swap, ...amountsFromV4Receipt(pool, swap.type, receipt.logs) }
         : swap
     const quotePrice = prices.get(log.timestamp) ?? null
     const size = sizes.get(`${log.txHash.toLowerCase()}-${log.logIndex}`)
     const baseAmount = formatUnits(filled.baseRaw, pool.base.decimals)
     const quoteAmount = formatUnits(filled.quoteRaw, pool.quote.decimals)
-    const priceQuote = priceInQuote(
-      filled.quoteRaw,
-      pool.quote.decimals,
-      filled.baseRaw,
-      pool.base.decimals,
-    )
-    const oneSided = filled.baseRaw === 0n || filled.quoteRaw === 0n || filled.type === "INIT"
-    const usd =
-      quotePrice === null || filled.type === "INIT"
-        ? null
-        : totalUsd(filled.quoteRaw, pool.quote.decimals, quotePrice)
-    const priceUsd = usd && !oneSided ? priceUsdFromTotal(usd, baseAmount) : null
+    const valued = valueLiquidityTrade(pool, filled, log, receipt?.logs ?? null, baseAmount, quotePrice)
     const trade: Trade = {
       id: `${log.txHash}-${log.logIndex}`,
       txNo: 0,
@@ -409,15 +479,15 @@ async function hydrate(
       blockNumber: log.blockNumber,
       logIndex: log.logIndex,
       type: filled.type,
-      priceQuote: oneSided ? null : priceQuote,
+      priceQuote: valued.priceQuote,
       baseAmount,
       quoteAmount,
       baseReserve: size?.base ?? null,
       quoteReserve: size?.quote ?? null,
       holders: null,
-      totalUsd: usd,
-      priceUsd,
-      marketCapUsd: marketCapFromPrice(priceUsd, pool.baseTotalSupply),
+      totalUsd: valued.totalUsd,
+      priceUsd: valued.priceUsd,
+      marketCapUsd: marketCapFromPrice(valued.priceUsd, pool.baseTotalSupply),
       maker: makers.get(log.txHash.toLowerCase())?.from ?? "",
       router: makers.get(log.txHash.toLowerCase())?.to ?? "",
       makerTxCount: 0,

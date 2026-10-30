@@ -44,8 +44,10 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Transactions table",
     summary: "One row per buy, sell, add, remove, or init — oldest is No. 1.",
     bullets: [
-      "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount.",
+      "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price).",
       "M. Cap is unit price × token supply when supply is known.",
+      "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
+      "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove amounts come from ERC-20 transfers to/from the PoolManager; native ETH has no Transfer so the ETH column stays 0 on one-sided adds, matching DEXTools.",
       "Pool columns are the pool balances right after that event (hover for the exact value).",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
       "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
@@ -58,6 +60,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Reading Gas Fee Total",
         body: "If row No. 1 cost 0.0010 ETH gas and row No. 2 cost 0.0005 ETH, Gas Fee Total on row 2 shows 0.0015 ETH. Two events in the same txHash only add once.",
+      },
+      {
+        title: "V4 Init + first Add",
+        body: "GINNAN/ETH pool creation emits Init (price $0.0₈2320, amounts 0) and Add (1,000,000,000 GINNAN, 0 ETH, Total ≈ $2,320) in the same second. Add / Remove shows 1 / 0 — Init is not an Add.",
       },
       {
         title: "High Gas Price vs gas tracker",

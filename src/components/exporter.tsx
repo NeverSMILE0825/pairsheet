@@ -49,6 +49,7 @@ import {
   sumDecimals,
 } from "@/lib/format"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
+import { summarizeTrades } from "@/lib/trade-stats"
 import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trade-size"
 import { IntervalChartDialog } from "@/components/interval-chart"
 import { LiveMarketWidgets } from "@/components/live-market"
@@ -918,7 +919,13 @@ export function Exporter() {
     return [...counts.entries()].sort((left, right) => right[1].count - left[1].count || left[1].label.localeCompare(right[1].label))
   }, [trades])
 
-  const stats = useMemo(() => summarize(trades), [trades])
+  const stats = useMemo(() => {
+    const summary = summarizeTrades(trades)
+    return {
+      ...summary,
+      volume: summary.volume > 0 ? formatUsd(summary.volume.toFixed(2)) : "—",
+    }
+  }, [trades])
 
   const allVisibleSelected = pageRows.length > 0 && pageRows.every((trade) => selected.has(trade.id))
   const someVisibleSelected = pageRows.some((trade) => selected.has(trade.id))
@@ -2887,36 +2894,6 @@ const TYPE_TONE: Record<Trade["type"], string> = {
   ADD: "text-sky-400",
   REMOVE: "text-amber-400",
   INIT: "text-foreground",
-}
-
-function summarize(trades: Trade[]) {
-  let buys = 0
-  let sells = 0
-  let adds = 0
-  let removes = 0
-  let volume = 0
-  for (const trade of trades) {
-    if (trade.type === "ADD" || trade.type === "INIT") {
-      adds += 1
-      continue
-    }
-    if (trade.type === "REMOVE") {
-      removes += 1
-      continue
-    }
-    if (trade.type === "BUY") buys += 1
-    else sells += 1
-    const total = Number(trade.totalUsd)
-    if (Number.isFinite(total)) volume += total
-  }
-  return {
-    count: trades.length,
-    buys,
-    sells,
-    adds,
-    removes,
-    volume: volume > 0 ? formatUsd(volume.toFixed(2)) : "—",
-  }
 }
 
 function tagWeight(trade: Trade): number {
