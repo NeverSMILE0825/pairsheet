@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-30T10:24:01.690Z",
+  "updatedAt": "2026-10-30T10:24:03.666Z",
   "bookmarks": [
     {
       "id": "ether:0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
@@ -29,16 +29,16 @@
       "starred": true
     },
     {
-      "id": "ether:0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
-      "savedAt": "2026-10-30T01:13:41.692Z",
+      "id": "ether:0x6109c6323f02616c71cfe5f3657d978a0bfc033a",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x6109c6323f02616c71cfe5f3657d978a0bfc033a",
+      "savedAt": "2026-10-29T17:46:33.007Z",
       "chainId": "ether",
       "chainName": "Ethereum",
-      "address": "0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
-      "dex": "Uniswap V3",
-      "baseSymbol": "BITPEPE",
+      "address": "0x6109c6323f02616c71cfe5f3657d978a0bfc033a",
+      "dex": "Uniswap V2",
+      "baseSymbol": "BITNEIRO",
       "quoteSymbol": "WETH",
-      "tradeCount": 893,
+      "tradeCount": 126,
       "starred": false
     },
     {
