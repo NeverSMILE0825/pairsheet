@@ -289,6 +289,7 @@ export function Exporter() {
   const [saveNotice, setSaveNotice] = useState<string | null>(null)
   const [saveNoticeTone, setSaveNoticeTone] = useState<"ok" | "error" | "info">("info")
   const [gasSavePrompt, setGasSavePrompt] = useState(false)
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
@@ -319,6 +320,10 @@ export function Exporter() {
       await refreshSavedList()
     })()
   }, [])
+
+  useEffect(() => {
+    if (showSelectedOnly && selected.size === 0) setShowSelectedOnly(false)
+  }, [showSelectedOnly, selected])
 
   function persistLookupFlag(key: string, next: boolean) {
     try {
@@ -595,6 +600,7 @@ export function Exporter() {
     setFunder("")
     setSelected(new Set())
     selectionAnchor.current = null
+    setShowSelectedOnly(false)
     setIncome(null)
     setFunding(null)
     setHoldersBusy(false)
@@ -764,6 +770,7 @@ export function Exporter() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const rows = trades.filter((trade) => {
+      if (showSelectedOnly && !selected.has(trade.id)) return false
       if (filter !== "ALL" && trade.type !== filter) return false
       if (funder === "__none__" && trade.fundedByAddress) return false
       if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
@@ -797,7 +804,7 @@ export function Exporter() {
       if (missingA !== missingB) return missingA ? 1 : -1
       return compareTrades(a, b, sortKey) * direction
     })
-  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period])
+  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period, showSelectedOnly])
 
   /** Minute tape ignores type filter so Buy/Sell columns both stay meaningful. */
   const minuteSource = useMemo(() => {
@@ -932,7 +939,10 @@ export function Exporter() {
     })
   }
 
-  /** Normal click toggles one row. Shift+click selects every row between the anchor and this one (current table order). */
+  /**
+   * Normal click toggles one row. Shift+click selects every row between the
+   * anchor and this one (current filtered table order).
+   */
   function selectTrade(trade: Trade, shiftKey: boolean) {
     const index = filtered.findIndex((row) => row.id === trade.id)
     if (index < 0) return
@@ -942,17 +952,21 @@ export function Exporter() {
       changeSelection((draft) => {
         for (let i = from; i <= to; i += 1) draft.add(filtered[i].id)
       })
+      selectionAnchor.current = index
       return
     }
     toggleTrade(trade.id)
     selectionAnchor.current = index
   }
 
+  /** Header checkbox: select / clear every row on the current page only. */
   function toggleVisible() {
+    const pageIds = pageRows.map((trade) => trade.id)
     changeSelection((draft) => {
-      for (const trade of pageRows) {
-        if (allVisibleSelected) draft.delete(trade.id)
-        else draft.add(trade.id)
+      if (allVisibleSelected) {
+        for (const id of pageIds) draft.delete(id)
+      } else {
+        for (const id of pageIds) draft.add(id)
       }
     })
     selectionAnchor.current = pageRows.length > 0 ? filtered.findIndex((row) => row.id === pageRows[0].id) : null
@@ -2203,6 +2217,27 @@ export function Exporter() {
                   Select
                 </Button>
               </div>
+              <Button
+                type="button"
+                variant={showSelectedOnly ? "default" : "outline"}
+                size="sm"
+                className="h-8"
+                disabled={selected.size === 0 && !showSelectedOnly}
+                aria-pressed={showSelectedOnly}
+                onClick={() => {
+                  setShowSelectedOnly((current) => !current)
+                  setPage(0)
+                }}
+                title={
+                  showSelectedOnly
+                    ? "Show the full filtered tape again"
+                    : "Show only checked rows in the table"
+                }
+              >
+                {showSelectedOnly
+                  ? `Show all${filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}`
+                  : `Show selected${selected.size > 0 ? ` · ${selected.size.toLocaleString("en-US")}` : ""}`}
+              </Button>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <DateTimeField
                   label="Start time"
@@ -2230,13 +2265,14 @@ export function Exporter() {
                   <CalendarRange />
                   Extract
                 </Button>
-                {selected.size > 0 ? (
+                {selected.size > 0 || showSelectedOnly ? (
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
                     onClick={() => {
                       changeSelection((draft) => draft.clear())
                       selectionAnchor.current = null
+                      setShowSelectedOnly(false)
                     }}
                   >
                     <X className="size-3.5" />
@@ -2484,25 +2520,33 @@ export function Exporter() {
                 <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
                   <tr>
                     <th className="w-10 px-3 py-2" aria-sort={sortKey === "selected" ? (sortDesc ? "descending" : "ascending") : "none"}>
-                      <input
-                        type="checkbox"
-                        aria-label="Select all transactions on this page"
-                        className="size-4 cursor-pointer accent-[var(--primary)]"
-                        checked={allVisibleSelected}
-                        ref={(node) => {
-                          if (node) node.indeterminate = someVisibleSelected && !allVisibleSelected
-                        }}
-                        onChange={toggleVisible}
-                        disabled={pageRows.length === 0}
-                      />
-                      <button
-                        type="button"
-                        className="mt-1 inline-flex items-center text-muted-foreground hover:text-foreground"
-                        aria-label="Sort by selected"
-                        onClick={() => toggleSort("selected")}
-                      >
-                        {sortKey === "selected" ? sortDesc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-50" />}
-                      </button>
+                      <div className="flex flex-col items-center gap-1">
+                        <input
+                          type="checkbox"
+                          aria-label="Select all transactions on this page"
+                          title={
+                            allVisibleSelected
+                              ? "Clear checkboxes on this page"
+                              : "Check every transaction on this page"
+                          }
+                          className="size-4 cursor-pointer accent-[var(--primary)]"
+                          checked={allVisibleSelected}
+                          ref={(node) => {
+                            if (node) node.indeterminate = someVisibleSelected && !allVisibleSelected
+                          }}
+                          onChange={toggleVisible}
+                          disabled={pageRows.length === 0}
+                        />
+                        <button
+                          type="button"
+                          className="inline-flex items-center text-muted-foreground hover:text-foreground"
+                          aria-label="Sort by selected"
+                          title="Sort by checked state"
+                          onClick={() => toggleSort("selected")}
+                        >
+                          {sortKey === "selected" ? sortDesc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" /> : <ArrowUpDown className="size-3 opacity-50" />}
+                        </button>
+                      </div>
                     </th>
                     {showTx("txNo") ? <SortHeader label="No" column="txNo" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
                     {showTx("timestamp") ? <SortHeader label={`Date (${zoneName})`} column="timestamp" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} /> : null}
@@ -2561,19 +2605,28 @@ export function Exporter() {
                         <td className="px-3 py-2">
                           <input
                             type="checkbox"
-                            aria-label={`Select ${trade.type} ${trade.txHash}`}
+                            aria-label={`Select transaction No ${trade.txNo}`}
                             title="Click to toggle. Shift+click to select a range."
                             className="size-4 cursor-pointer accent-[var(--primary)]"
                             checked={selected.has(trade.id)}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              selectTrade(trade, event.shiftKey)
+                            onChange={(event) => {
+                              // Shift+click is handled in onClick (range select).
+                              if (event.nativeEvent instanceof MouseEvent && event.nativeEvent.shiftKey) return
+                              selectTrade(trade, false)
                             }}
-                            onChange={() => {}}
+                            onClick={(event) => {
+                              if (!event.shiftKey) return
+                              event.preventDefault()
+                              selectTrade(trade, true)
+                            }}
                           />
                         </td>
                         {showTx("txNo") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums" title="Transaction number (oldest = 1)">
+                          <td
+                            className="cursor-pointer px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums hover:text-foreground"
+                            title="Transaction number (oldest = 1). Click to check/uncheck this row."
+                            onClick={(event) => selectTrade(trade, event.shiftKey)}
+                          >
                             {trade.txNo.toLocaleString("en-US")}
                           </td>
                         ) : null}
