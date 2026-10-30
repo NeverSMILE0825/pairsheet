@@ -25,8 +25,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Supported: Ethereum and major EVM L2s, plus Solana pools that DEXTools indexes.",
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
-      "Under the URL, optional checkboxes (all off by default): Gas Price / Gas Fee Total, Holders, and Funded by. Unchecked steps are skipped so loads stay fast.",
-      "You can Save analysis as soon as the swap tape finishes — even while optional lookups are still running or left empty.",
+      "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
+      "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
     ],
     examples: [
       {
@@ -34,8 +34,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
       },
       {
-        title: "Fast save",
-        body: "Leave Gas, Holders, and Funded by unchecked, load the pair, then Save as soon as transactions appear. Check only the columns you need for that snapshot.",
+        title: "Load holders later",
+        body: "Load swaps with all options unchecked, Save if you want, then click Load next to Holders, confirm the dialog, and wait for the column to fill.",
       },
     ],
   },

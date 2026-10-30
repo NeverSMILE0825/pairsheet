@@ -129,7 +129,29 @@ const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
 
 type Phase = "idle" | "loading" | "done" | "error"
+type ExtraLookup = "gas" | "holders" | "funders"
 type SideFilter = "ALL" | "BUY" | "SELL" | "ADD" | "REMOVE" | "INIT"
+
+const EXTRA_LOOKUP_COPY: Record<
+  ExtraLookup,
+  { title: string; body: string; confirm: string }
+> = {
+  gas: {
+    title: "Load gas fees?",
+    body: "Fetch transaction receipts to fill Gas Price and Gas Fee Total for every row. This can take a while on large tapes.",
+    confirm: "Load gas fees",
+  },
+  holders: {
+    title: "Load holders?",
+    body: "Replay base-token transfers to count holders after each transaction. This can take a while on busy tokens.",
+    confirm: "Load holders",
+  },
+  funders: {
+    title: "Load Funded by?",
+    body: "Look up which address first funded each maker wallet. This is often the slowest optional step.",
+    confirm: "Load Funded by",
+  },
+}
 
 const FILTER_LABELS: Record<SideFilter, string> = {
   ALL: "All",
@@ -248,6 +270,8 @@ export function Exporter() {
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
   const [holdersBusy, setHoldersBusy] = useState(false)
+  const [gasBusy, setGasBusy] = useState(false)
+  const [confirmExtra, setConfirmExtra] = useState<ExtraLookup | null>(null)
   const run = useRef(0)
   const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -317,6 +341,67 @@ export function Exporter() {
   function changeLookupHolders(next: boolean) {
     setLookupHolders(next)
     persistLookupFlag(LOOKUP_HOLDERS_KEY, next)
+  }
+
+  const tapeReady = phase === "done" && pool !== null && rawTrades.length > 0
+  const extraBusy = gasBusy || holdersBusy || funding !== null
+
+  async function runExtraLookup(kind: ExtraLookup) {
+    if (!pool || rawTrades.length === 0 || phase !== "done") return
+    run.current += 1
+    const token = run.current
+    const chainId = pool.chainId
+    try {
+      if (kind === "gas") {
+        const chain = getChain(chainId)
+        if (!chain || chain.id === "solana") {
+          flashNotice("Gas columns are only available on EVM chains.", "info")
+          return
+        }
+        setGasBusy(true)
+        setProgress(
+          `Filling gas fees for ${countMissingGas(rawTrades).toLocaleString("en-US") || rawTrades.length.toLocaleString("en-US")} transactions…`,
+        )
+        const result = await repairTradeGas(rawTrades, chain.rpcs, (progress) => {
+          if (run.current !== token) return
+          setProgress(
+            `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+          )
+        })
+        if (run.current !== token) return
+        setTrades(result.trades)
+        setProgress("")
+        flashNotice(
+          result.missing > 0
+            ? `Filled gas for ${result.fetched.toLocaleString("en-US")} txs; ${result.missing.toLocaleString("en-US")} still missing.`
+            : `Gas Price and Gas Fee Total updated for ${pool.baseSymbol} / ${pool.quoteSymbol}.`,
+          result.missing > 0 ? "info" : "ok",
+        )
+        return
+      }
+      if (kind === "holders") {
+        await lookUpHolders(chainId, pool, rawTrades, token)
+        if (run.current !== token) return
+        flashNotice(`Holders updated for ${pool.baseSymbol} / ${pool.quoteSymbol}.`, "ok")
+        return
+      }
+      await lookUpFunders(
+        chainId,
+        rawTrades.map((trade) => trade.maker),
+        token,
+        rawTrades,
+      )
+      if (run.current !== token) return
+      flashNotice(`Funded by updated for ${pool.baseSymbol} / ${pool.quoteSymbol}.`, "ok")
+    } catch (error) {
+      if (run.current !== token) return
+      flashNotice(error instanceof Error ? error.message : "Could not load that data.", "error")
+    } finally {
+      if (run.current === token) {
+        setGasBusy(false)
+        setProgress("")
+      }
+    }
   }
 
   useEffect(() => {
@@ -1354,45 +1439,71 @@ export function Exporter() {
         </div>
         <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
           <p className="text-xs">
-            Optional lookups (off by default). Leave unchecked for a faster load — you can Save as soon as the tape finishes.
+            Optional lookups (off by default on Load swaps). After the tape is ready, use{" "}
+            <span className="text-foreground">Load</span> on a row to fetch that column — you will confirm first.
           </p>
-          <label className="flex cursor-pointer items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 rounded border-border"
-              checked={lookupGas}
-              disabled={phase === "loading"}
-              onChange={(event) => changeLookupGas(event.target.checked)}
-            />
-            <span>
-              Look up <span className="text-foreground">Gas Price</span> and{" "}
-              <span className="text-foreground">Gas Fee Total</span>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 rounded border-border"
-              checked={lookupHolders}
-              disabled={phase === "loading"}
-              onChange={(event) => changeLookupHolders(event.target.checked)}
-            />
-            <span>
-              Look up <span className="text-foreground">Holders</span> at each transaction
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 rounded border-border"
-              checked={lookupFunders}
-              disabled={phase === "loading"}
-              onChange={(event) => changeLookupFunders(event.target.checked)}
-            />
-            <span>
-              Look up <span className="text-foreground">Funded by</span> for each maker
-            </span>
-          </label>
+          {(
+            [
+              {
+                kind: "gas" as const,
+                checked: lookupGas,
+                onChange: changeLookupGas,
+                busy: gasBusy,
+                label: (
+                  <>
+                    <span className="text-foreground">Gas Price</span> and{" "}
+                    <span className="text-foreground">Gas Fee Total</span>
+                  </>
+                ),
+              },
+              {
+                kind: "holders" as const,
+                checked: lookupHolders,
+                onChange: changeLookupHolders,
+                busy: holdersBusy,
+                label: (
+                  <>
+                    <span className="text-foreground">Holders</span> at each transaction
+                  </>
+                ),
+              },
+              {
+                kind: "funders" as const,
+                checked: lookupFunders,
+                onChange: changeLookupFunders,
+                busy: funding !== null,
+                label: (
+                  <>
+                    <span className="text-foreground">Funded by</span> for each maker
+                  </>
+                ),
+              },
+            ] as const
+          ).map((row) => (
+            <div key={row.kind} className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="size-4 shrink-0 rounded border-border"
+                  checked={row.checked}
+                  disabled={phase === "loading"}
+                  onChange={(event) => row.onChange(event.target.checked)}
+                />
+                <span className="min-w-0">Include on Load swaps · {row.label}</span>
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={!tapeReady || extraBusy}
+                onClick={() => setConfirmExtra(row.kind)}
+              >
+                {row.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {row.busy ? "Loading…" : "Load"}
+              </Button>
+            </div>
+          ))}
         </div>
       </form>
 
@@ -1678,9 +1789,9 @@ export function Exporter() {
         </div>
       ) : null}
 
-      {phase === "loading" ? (
+      {phase === "loading" || gasBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
-          {progress}
+          {progress || (gasBusy ? "Filling gas fees…" : "")}
         </p>
       ) : holdersBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -1690,6 +1801,48 @@ export function Exporter() {
         <p className="text-sm text-muted-foreground" role="status">
           Finding who funded each wallet: {funding.done.toLocaleString("en-US")} of {funding.total.toLocaleString("en-US")}
         </p>
+      ) : null}
+
+      {confirmExtra ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setConfirmExtra(null)
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="extra-lookup-title"
+            className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl ring-1 ring-foreground/10"
+          >
+            <h2 id="extra-lookup-title" className="text-base font-semibold tracking-tight">
+              {EXTRA_LOOKUP_COPY[confirmExtra].title}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {EXTRA_LOOKUP_COPY[confirmExtra].body}
+              {pool
+                ? ` Currently loaded: ${pool.baseSymbol} / ${pool.quoteSymbol} · ${rawTrades.length.toLocaleString("en-US")} transactions.`
+                : ""}
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setConfirmExtra(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  const kind = confirmExtra
+                  setConfirmExtra(null)
+                  void runExtraLookup(kind)
+                }}
+              >
+                {EXTRA_LOOKUP_COPY[confirmExtra].confirm}
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {error ? (
