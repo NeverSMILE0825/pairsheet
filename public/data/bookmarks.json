@@ -1,7 +1,20 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-30T09:01:40.304Z",
+  "updatedAt": "2026-10-30T09:48:00.803Z",
   "bookmarks": [
+    {
+      "id": "ether:0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "savedAt": "2026-10-30T09:47:59.632Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "dex": "Uniswap V2",
+      "baseSymbol": "Cheyenne",
+      "quoteSymbol": "WETH",
+      "tradeCount": 242,
+      "starred": false
+    },
     {
       "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
