@@ -121,6 +121,7 @@ type PeriodFilter = { startMs: number; endMs: number }
 /** Soft cap so a single browser session stays responsive; explorer windows can exceed 10k. */
 const MAX_TRADES = 50000
 const ZONE_KEY = "pairsheet.timezone"
+const LOOKUP_FUNDERS_KEY = "pairsheet.lookupFunders"
 const PAGE_SIZES = [25, 50, 100, 250]
 const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
@@ -239,6 +240,7 @@ export function Exporter() {
       return AUTO_ZONE
     }
   })
+  const [lookupFunders, setLookupFunders] = useState(false)
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
   const [holdersBusy, setHoldersBusy] = useState(false)
@@ -269,6 +271,14 @@ export function Exporter() {
   const importFileRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
+    try {
+      setLookupFunders(window.localStorage.getItem(LOOKUP_FUNDERS_KEY) === "1")
+    } catch {
+      setLookupFunders(false)
+    }
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       await hydrateSyncStorage()
       setSyncEnabled(hasSyncToken())
@@ -277,6 +287,15 @@ export function Exporter() {
       await refreshSavedList()
     })()
   }, [])
+
+  function changeLookupFunders(next: boolean) {
+    setLookupFunders(next)
+    try {
+      window.localStorage.setItem(LOOKUP_FUNDERS_KEY, next ? "1" : "0")
+    } catch {
+      return
+    }
+  }
 
   useEffect(() => {
     if (!savedOpen) return
@@ -568,12 +587,14 @@ export function Exporter() {
         void lookUpWalletFacts(chainId, poolView, finalTrades, token)
         void lookUpHolders(chainId, poolView, finalTrades, token)
       }
-      void lookUpFunders(
-        chainId,
-        finalTrades.map((trade) => trade.maker),
-        token,
-        finalTrades,
-      )
+      if (lookupFunders) {
+        void lookUpFunders(
+          chainId,
+          finalTrades.map((trade) => trade.maker),
+          token,
+          finalTrades,
+        )
+      }
     } catch (loadError) {
       if (run.current !== token) return
       setPhase("error")
@@ -1308,6 +1329,21 @@ export function Exporter() {
             {phase === "loading" ? "Reading chain" : "Load swaps"}
           </Button>
         </div>
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 shrink-0 rounded border-border"
+            checked={lookupFunders}
+            disabled={phase === "loading"}
+            onChange={(event) => changeLookupFunders(event.target.checked)}
+          />
+          <span>
+            Look up <span className="text-foreground">Funded by</span> for each maker
+            <span className="block text-xs">
+              Off by default — this step is slow. Leave unchecked to save as soon as the tape (and holders) finish.
+            </span>
+          </span>
+        </label>
       </form>
 
       {savedOpen ? (
@@ -1647,23 +1683,19 @@ export function Exporter() {
                 variant="outline"
                 className="h-11"
                 onClick={() => void persistAnalysis()}
-                disabled={
-                  rawTrades.length === 0 ||
-                  saveBusy ||
-                  phase === "loading" ||
-                  holdersBusy ||
-                  funding !== null
-                }
+                disabled={rawTrades.length === 0 || saveBusy || phase === "loading" || holdersBusy}
                 title={
-                  holdersBusy || funding
-                    ? "Wait until holders and funders finish so the save includes them."
-                    : undefined
+                  holdersBusy
+                    ? "Wait until holder counts finish so the save includes them."
+                    : funding
+                      ? "Funded-by lookup is still running; save will keep whatever funders are filled so far."
+                      : undefined
                 }
               >
                 {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
                 {saveBusy ? "Saving…" : "Save analysis"}
               </Button>
-              <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0 || funding !== null}>
+              <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0}>
                 <Download />
                 Download CSV
                 {filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}

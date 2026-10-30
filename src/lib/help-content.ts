@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-10-29"
+export const HELP_UPDATED_AT = "2026-10-30"
 
 export type HelpExample = {
   title: string
@@ -25,12 +25,17 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Supported: Ethereum and major EVM L2s, plus Solana pools that DEXTools indexes.",
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
-      "Progress covers trades, funders, and holders — wait for those to finish before saving if you need them in the snapshot.",
+      "Progress covers trades and holders. Funded-by lookup is optional (checkbox under the URL) and off by default because it is slow.",
+      "You can Save analysis as soon as the tape and holders finish — even if Funded by is still empty or still running.",
     ],
     examples: [
       {
         title: "Example URL",
         body: "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
+      },
+      {
+        title: "Skip Funded by to save faster",
+        body: "Leave “Look up Funded by” unchecked, load the pair, wait for holders, then Save. Check the box only when you need funder addresses in the snapshot.",
       },
     ],
   },
@@ -48,7 +53,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "After the tape finishes loading, Pair Sheet retries receipt lookups for any missing gas (multi-pass, several RPCs) and recomputes Gas Fee Total across the full history.",
       "Opening an older saved tape recalculates missing or non-3-decimal gas columns and asks whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
-      "Funded by is the address that first sent native currency into the maker.",
+      "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
     ],
     examples: [
       {
