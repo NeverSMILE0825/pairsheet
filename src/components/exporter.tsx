@@ -368,12 +368,12 @@ export function Exporter() {
         }
         setGasBusy(true)
         setProgress(
-          `Filling gas fees for ${countMissingGas(rawTrades).toLocaleString("en-US") || rawTrades.length.toLocaleString("en-US")} transactionsâ€¦`,
+          `Filling gas fees for ${countMissingGas(rawTrades).toLocaleString("en-US") || rawTrades.length.toLocaleString("en-US")} transactions…`,
         )
         const result = await repairTradeGas(rawTrades, chain.rpcs, (progress) => {
           if (run.current !== token) return
           setProgress(
-            `Filling gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+            `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
           )
         })
         if (run.current !== token) return
@@ -627,7 +627,7 @@ export function Exporter() {
     const token = run.current
     setPhase("loading")
     resetViewState()
-    setProgress("Reading transactions from the chainâ€¦")
+    setProgress("Reading transactions from the chain…")
 
     try {
       let cursor: string | null = null
@@ -662,7 +662,7 @@ export function Exporter() {
         setTrades([...loaded])
         setProgress(
           body.nextCursor
-            ? `Loaded ${loaded.length.toLocaleString("en-US")} transactions. Still reading the chainâ€¦`
+            ? `Loaded ${loaded.length.toLocaleString("en-US")} transactions. Still reading the chain…`
             : `Loaded ${loaded.length.toLocaleString("en-US")} transactions.`,
         )
         cursor = body.nextCursor
@@ -678,12 +678,12 @@ export function Exporter() {
         const chain = getChain(chainId)
         if (chain && chain.id !== "solana" && countMissingGas(finalTrades) > 0) {
           setProgress(
-            `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactionsâ€¦`,
+            `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactions…`,
           )
           const result = await repairTradeGas(finalTrades, chain.rpcs, (progress) => {
             if (run.current !== token) return
             setProgress(
-              `Filling gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+              `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
             )
           })
           if (run.current !== token) return
@@ -1153,7 +1153,7 @@ export function Exporter() {
     const token = run.current
     setPhase("loading")
     resetViewState()
-    setProgress("Opening saved analysisâ€¦")
+    setProgress("Opening saved analysis…")
     try {
       const saved = await loadSavedAnalysis(id)
       if (saved) {
@@ -1169,15 +1169,15 @@ export function Exporter() {
           const need = countMissingGas(trades)
           setProgress(
             need > 0
-              ? `Refreshing gas fees for ${need.toLocaleString("en-US")} transactionsâ€¦`
-              : "Refreshing gas fee formattingâ€¦",
+              ? `Refreshing gas fees for ${need.toLocaleString("en-US")} transactions…`
+              : "Refreshing gas fee formatting…",
           )
           const chain = getChain(saved.pool.chainId)
           const rpcs = chain && chain.id !== "solana" ? chain.rpcs : null
           const result = await repairTradeGas(trades, rpcs, (progress) => {
             if (run.current !== token) return
             setProgress(
-              `Refreshing gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+              `Refreshing gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
             )
           })
           if (run.current !== token) return
@@ -1208,7 +1208,7 @@ export function Exporter() {
       if (!meta?.url) throw new Error("That saved analysis is no longer available.")
       setUrl(meta.url)
       flashNotice(
-        `Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)â€¦`,
+        `Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)…`,
         "info",
       )
       await load(meta.url)
@@ -1428,7 +1428,7 @@ export function Exporter() {
             id="pair-url"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://www.dextools.io/app/ether/pair-explorer/0xâ€¦"
+            placeholder="https://www.dextools.io/app/ether/pair-explorer/0x…"
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1525,7 +1525,7 @@ export function Exporter() {
                 onClick={() => setConfirmExtra(row.kind)}
               >
                 {row.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                {row.busy ? "Loadingâ€¦" : "Load"}
+                {row.busy ? "Loading…" : "Load"}
               </Button>
             </div>
           ))}
@@ -1577,7 +1577,7 @@ export function Exporter() {
                     }`}
                   />
                   {syncBusy
-                    ? "Syncing with GitHubâ€¦"
+                    ? "Syncing with GitHub…"
                     : isSyncSuccessful(syncStatus)
                       ? `Synced Â· ${syncStatus.lastCount} pair(s) Â· ${formatSyncAgo(syncStatus.lastOkAt)}`
                       : syncStatus.lastError
@@ -1662,7 +1662,7 @@ export function Exporter() {
                   type="password"
                   value={syncTokenDraft}
                   onChange={(event) => setSyncTokenDraft(event.target.value)}
-                  placeholder="github_pat_â€¦"
+                  placeholder="github_pat_…"
                   autoComplete="off"
                   spellCheck={false}
                   className="h-9 font-mono text-xs"
@@ -1816,11 +1816,11 @@ export function Exporter() {
 
       {phase === "loading" || gasBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
-          {progress || (gasBusy ? "Filling gas feesâ€¦" : "")}
+          {progress || (gasBusy ? "Filling gas fees…" : "")}
         </p>
       ) : holdersBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
-          Counting exact base-token holders at each transactionâ€¦
+          Counting exact base-token holders at each transaction…
         </p>
       ) : funding ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -1919,7 +1919,7 @@ export function Exporter() {
                 }
               >
                 {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
-                {saveBusy ? "Savingâ€¦" : "Save analysis"}
+                {saveBusy ? "Saving…" : "Save analysis"}
               </Button>
               <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0}>
                 <Download />
@@ -2486,12 +2486,12 @@ export function Exporter() {
                         ) : null}
                         {showDa("startHolders") ? (
                           <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
-                            {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
+                            {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                           </td>
                         ) : null}
                         {showDa("endHolders") ? (
                           <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
-                            {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
+                            {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                           </td>
                         ) : null}
                         {showDa("endGasPriceGwei") ? (
@@ -2601,7 +2601,7 @@ export function Exporter() {
                     <tr>
                       <td colSpan={Math.max(1, txColCount + 1)} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
-                          ? "Reading pool logsâ€¦"
+                          ? "Reading pool logs…"
                           : trades.length === 0
                             ? "No Uniswap-style transactions were found on this pool."
                             : "Nothing matches this filter."}
@@ -2697,7 +2697,7 @@ export function Exporter() {
                             className="px-3 py-2 text-right font-mono text-sm tabular-nums"
                             title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
                           >
-                            {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
+                            {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
                           </td>
                         ) : null}
                         {showTx("gasPriceGwei") ? (
@@ -2786,7 +2786,7 @@ export function Exporter() {
                               {trade.makerTags.includes("team") ? (
                                 <span
                                   className="text-amber-400"
-                                  title="Team wallet: deployed this token or added the poolâ€™s first liquidity."
+                                  title="Team wallet: deployed this token or added the pool’s first liquidity."
                                 >
                                   <Users className="size-4" aria-label="Team wallet" />
                                 </span>
@@ -2877,7 +2877,7 @@ export function Exporter() {
       ) : phase === "idle" || phase === "error" ? (
         <section className="grid gap-3 sm:grid-cols-3">
           <Step n="1" title="Paste the pair" body="Use the pair-explorer URL from DEXTools, including the chain and pool address." />
-          <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the poolâ€™s logs, with the wallet that sent each transaction and the pool size after it." />
+          <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the pool’s logs, with the wallet that sent each transaction and the pool size after it." />
           <Step n="3" title="Save the CSV" body="Date, type, USD price, total, both token amounts, pool size, holders, maker, who funded that wallet, and transaction hash." />
         </section>
       ) : null}
