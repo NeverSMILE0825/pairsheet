@@ -463,7 +463,7 @@ test("keeps significant digits for tiny pool sizes", () => {
   assert.equal(formatPoolSize("0"), "0")
 })
 
-test("reads uniswap v4 pool sizes from swap liquidity and sqrt price", async () => {
+test("V4 virtual reserves stay available but are not used as Pool columns", async () => {
   const word = (value: bigint) => value.toString(16).padStart(64, "0")
   const Q96 = 1n << 96n
   const liquidity = 1_000_000n * 10n ** 18n
@@ -496,7 +496,8 @@ test("reads uniswap v4 pool sizes from swap liquidity and sqrt price", async () 
     v4Pool,
     [log],
   )
-  assert.deepEqual(sizes.get(swapKey(log)), { base: "1000000", quote: "1000000" })
+  // Virtual L/√P must not fill Pool columns (that caused phantom ~1 ETH on GINNAN).
+  assert.equal(sizes.size, 0)
 })
 
 test("replays ERC-20 transfers into exact holder counts per log", () => {

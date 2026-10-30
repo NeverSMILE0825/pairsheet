@@ -44,11 +44,11 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Transactions table",
     summary: "One row per buy, sell, add, remove, or init — oldest is No. 1.",
     bullets: [
-      "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price).",
+      "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price). Small USD differences vs DEXTools come from their ETH/USD feed, not from token amounts.",
       "M. Cap is unit price × token supply when supply is known.",
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove amounts come from ERC-20 transfers to/from the PoolManager; native ETH has no Transfer so the ETH column stays 0 on one-sided adds, matching DEXTools.",
-      "Pool columns are the pool balances right after that event (hover for the exact value).",
+      "Pool columns are actual token balances after that event (V2 Sync, V3 balances, V4 running ADD/BUY/SELL ledger). V4 never shows virtual L/√P reserves — those looked like ~1 ETH on GINNAN even when no ETH was added.",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
       "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
@@ -63,7 +63,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         title: "V4 Init + first Add",
-        body: "GINNAN/ETH pool creation emits Init (price $0.0₈2320, amounts 0) and Add (1,000,000,000 GINNAN, 0 ETH, Total ≈ $2,320) in the same second. Add / Remove shows 1 / 0 — Init is not an Add.",
+        body: "GINNAN/ETH pool creation emits Init (price ≈ $0.0₅2320, amounts 0) and Add (1,000,000,000 GINNAN, 0 ETH, Total ≈ $2,320) in the same second. Add / Remove shows 1 / 0 — Init is not an Add.",
+      },
+      {
+        title: "V4 Pool ETH after the first buy",
+        body: "After a one-sided Add of only GINNAN, Pool ETH is 0. The first buy of 0.0464 ETH makes Pool ETH ≈ 0.0464 — not ~1.05 from virtual liquidity math.",
       },
       {
         title: "High Gas Price vs gas tracker",

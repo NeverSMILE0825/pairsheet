@@ -1,5 +1,5 @@
 import type { ChainConfig } from "./chains"
-import { decodeWord, isV2Family, sameAddress, SWAP_V4_TOPIC } from "./decode"
+import { decodeWord, isV2Family, sameAddress } from "./decode"
 import { formatUnits } from "./format"
 import { fetchJson, mapPool, rpcBatch } from "./http"
 import type { PoolContext, RawLog } from "./types"
@@ -23,19 +23,16 @@ const BALANCE_OF = "0x70a08231"
 // Swap, so those reserves are the exact pool size after that trade. Concentrated
 // liquidity pools do not emit reserves, so their size is the pair of token
 // balances the pool holds at the end of the swap's block.
-// Uniswap V4 keeps tokens in PoolManager (shared across pools), but every Swap
-// log includes post-swap sqrtPriceX96 + in-range liquidity — enough to recover
-// the pool's virtual token balances exactly from the event itself.
+// Uniswap V4 keeps tokens in a shared PoolManager — sqrtPrice×liquidity are
+// *virtual* reserves (often ~1 ETH at init even when no ETH was added). Actual
+// Pool columns are filled later by finalizeV4Tape ledger math.
 export async function loadPoolSizes(
   chain: ChainConfig,
   pool: PoolContext,
   logs: RawLog[],
 ): Promise<Map<string, PoolSize>> {
   const sizes = new Map<string, PoolSize>()
-  if (pool.style === "v4") {
-    fillFromV4SwapLogs(pool, logs, sizes)
-    return sizes
-  }
+  if (pool.style === "v4") return sizes
   const v2 = logs.filter((log) => isV2Family(log.topics[0] || ""))
   const v3 = logs.filter((log) => !isV2Family(log.topics[0] || ""))
   await Promise.all([fillFromSync(chain, pool, v2, sizes), fillFromBalances(chain, pool, v3, sizes)])
@@ -54,21 +51,6 @@ export function v4VirtualReserves(data: string): { amount0: bigint; amount1: big
     }
   } catch {
     return null
-  }
-}
-
-function fillFromV4SwapLogs(pool: PoolContext, swaps: RawLog[], sizes: Map<string, PoolSize>) {
-  const baseIs0 = sameAddress(pool.token0, pool.base.address)
-  for (const swap of swaps) {
-    if ((swap.topics[0] || "").toLowerCase() !== SWAP_V4_TOPIC) continue
-    const virtual = v4VirtualReserves(swap.data)
-    if (!virtual) continue
-    const baseRaw = baseIs0 ? virtual.amount0 : virtual.amount1
-    const quoteRaw = baseIs0 ? virtual.amount1 : virtual.amount0
-    sizes.set(swapKey(swap), {
-      base: formatUnits(baseRaw, pool.base.decimals),
-      quote: formatUnits(quoteRaw, pool.quote.decimals),
-    })
   }
 }
 

@@ -31,6 +31,8 @@ import { resolveFunders } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
 import { getSwapPage } from "@/lib/history"
 import { AppError } from "@/lib/http"
+import { isPoolId } from "@/lib/pool"
+import { finalizeV4Tape } from "@/lib/v4-tape"
 import { lookUpWallets } from "@/lib/wallets"
 import { EMPTY_FACTS, annotateTrades, routersToCheck, type WalletFacts } from "@/lib/annotate"
 import { csvFilename, tradesToCsv } from "@/lib/csv"
@@ -695,6 +697,7 @@ export function Exporter() {
         }
       }
       if (run.current !== token) return
+      if (poolView) finalTrades = polishTape(poolView, finalTrades)
       setTrades(finalTrades)
       setPhase("done")
       setProgress("")
@@ -1182,6 +1185,7 @@ export function Exporter() {
           repaired = result.changed
           stillMissing = result.missing
         }
+        trades = polishTape(saved.pool, trades)
         setTrades(trades)
         setPhase("done")
         setProgress("")
@@ -2894,6 +2898,13 @@ const TYPE_TONE: Record<Trade["type"], string> = {
   ADD: "text-sky-400",
   REMOVE: "text-amber-400",
   INIT: "text-foreground",
+}
+
+/** V4: ledger pool balances + backfill INIT price / one-sided ADD totals. */
+function polishTape(pool: PoolView, trades: Trade[]): Trade[] {
+  const v4 = isPoolId(pool.address) || /uniswap\s*v4|(^|[^0-9])v4([^0-9]|$)/i.test(pool.dex)
+  if (!v4) return trades
+  return finalizeV4Tape(trades, pool.baseTotalSupply)
 }
 
 function tagWeight(trade: Trade): number {
