@@ -25,8 +25,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Supported: Ethereum and major EVM L2s, plus Solana pools that DEXTools indexes.",
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
-      "Progress covers trades and holders. Funded-by lookup is optional (checkbox under the URL) and off by default because it is slow.",
-      "You can Save analysis as soon as the tape and holders finish — even if Funded by is still empty or still running.",
+      "Under the URL, optional checkboxes (all off by default): Gas Price / Gas Fee Total, Holders, and Funded by. Unchecked steps are skipped so loads stay fast.",
+      "You can Save analysis as soon as the swap tape finishes — even while optional lookups are still running or left empty.",
     ],
     examples: [
       {
@@ -34,8 +34,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
       },
       {
-        title: "Skip Funded by to save faster",
-        body: "Leave “Look up Funded by” unchecked, load the pair, wait for holders, then Save. Check the box only when you need funder addresses in the snapshot.",
+        title: "Fast save",
+        body: "Leave Gas, Holders, and Funded by unchecked, load the pair, then Save as soon as transactions appear. Check only the columns you need for that snapshot.",
       },
     ],
   },
@@ -47,11 +47,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount.",
       "M. Cap is unit price × token supply when supply is known.",
       "Pool columns are the pool balances right after that event (hover for the exact value).",
-      "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded).",
-      "Gas Price = that transaction’s effective gas price in gwei (3 decimals) from the receipt (base fee + priority tip). Gas Fee Total = running ETH spend of unique txs from the oldest loaded trade through this row (4 decimals).",
+      "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
+      "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
-      "After the tape finishes loading, Pair Sheet retries receipt lookups for any missing gas (multi-pass, several RPCs) and recomputes Gas Fee Total across the full history.",
-      "Opening an older saved tape recalculates missing or non-3-decimal gas columns and asks whether to save the update.",
+      "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
       "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
     ],

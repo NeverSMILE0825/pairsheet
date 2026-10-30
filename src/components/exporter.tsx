@@ -122,6 +122,8 @@ type PeriodFilter = { startMs: number; endMs: number }
 const MAX_TRADES = 50000
 const ZONE_KEY = "pairsheet.timezone"
 const LOOKUP_FUNDERS_KEY = "pairsheet.lookupFunders"
+const LOOKUP_GAS_KEY = "pairsheet.lookupGas"
+const LOOKUP_HOLDERS_KEY = "pairsheet.lookupHolders"
 const PAGE_SIZES = [25, 50, 100, 250]
 const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
@@ -241,6 +243,8 @@ export function Exporter() {
     }
   })
   const [lookupFunders, setLookupFunders] = useState(false)
+  const [lookupGas, setLookupGas] = useState(false)
+  const [lookupHolders, setLookupHolders] = useState(false)
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
   const [holdersBusy, setHoldersBusy] = useState(false)
@@ -273,8 +277,12 @@ export function Exporter() {
   useEffect(() => {
     try {
       setLookupFunders(window.localStorage.getItem(LOOKUP_FUNDERS_KEY) === "1")
+      setLookupGas(window.localStorage.getItem(LOOKUP_GAS_KEY) === "1")
+      setLookupHolders(window.localStorage.getItem(LOOKUP_HOLDERS_KEY) === "1")
     } catch {
       setLookupFunders(false)
+      setLookupGas(false)
+      setLookupHolders(false)
     }
   }, [])
 
@@ -288,13 +296,27 @@ export function Exporter() {
     })()
   }, [])
 
-  function changeLookupFunders(next: boolean) {
-    setLookupFunders(next)
+  function persistLookupFlag(key: string, next: boolean) {
     try {
-      window.localStorage.setItem(LOOKUP_FUNDERS_KEY, next ? "1" : "0")
+      window.localStorage.setItem(key, next ? "1" : "0")
     } catch {
       return
     }
+  }
+
+  function changeLookupFunders(next: boolean) {
+    setLookupFunders(next)
+    persistLookupFlag(LOOKUP_FUNDERS_KEY, next)
+  }
+
+  function changeLookupGas(next: boolean) {
+    setLookupGas(next)
+    persistLookupFlag(LOOKUP_GAS_KEY, next)
+  }
+
+  function changeLookupHolders(next: boolean) {
+    setLookupHolders(next)
+    persistLookupFlag(LOOKUP_HOLDERS_KEY, next)
   }
 
   useEffect(() => {
@@ -525,7 +547,7 @@ export function Exporter() {
         for (let attempt = 0; attempt < PAGE_ATTEMPTS && !body; attempt += 1) {
           if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1500 * attempt))
           try {
-            body = await getSwapPage(trimmed, cursor)
+            body = await getSwapPage(trimmed, cursor, { includeGas: lookupGas })
             if (run.current !== token) return
           } catch (requestError) {
             if (run.current !== token) return
@@ -556,28 +578,29 @@ export function Exporter() {
         }
       } while (cursor)
 
-      let finalTrades = assignGasFeeTotals(loaded)
-      const chain = getChain(chainId)
-      if (chain && chain.id !== "solana" && countMissingGas(finalTrades) > 0) {
-        setProgress(
-          `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactions…`,
-        )
-        const result = await repairTradeGas(finalTrades, chain.rpcs, (progress) => {
-          if (run.current !== token) return
+      let finalTrades = loaded
+      if (lookupGas) {
+        finalTrades = assignGasFeeTotals(loaded)
+        const chain = getChain(chainId)
+        if (chain && chain.id !== "solana" && countMissingGas(finalTrades) > 0) {
           setProgress(
-            `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+            `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactions…`,
           )
-        })
-        if (run.current !== token) return
-        finalTrades = result.trades
-        if (result.missing > 0) {
-          flashNotice(
-            `Loaded gas for ${(result.fetched).toLocaleString("en-US")} txs; ${result.missing.toLocaleString("en-US")} still missing after retries. Re-open the saved tape or reload to retry those.`,
-            "info",
-          )
+          const result = await repairTradeGas(finalTrades, chain.rpcs, (progress) => {
+            if (run.current !== token) return
+            setProgress(
+              `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+            )
+          })
+          if (run.current !== token) return
+          finalTrades = result.trades
+          if (result.missing > 0) {
+            flashNotice(
+              `Loaded gas for ${result.fetched.toLocaleString("en-US")} txs; ${result.missing.toLocaleString("en-US")} still missing after retries. Re-open the saved tape or reload to retry those.`,
+              "info",
+            )
+          }
         }
-      } else {
-        finalTrades = assignGasFeeTotals(finalTrades)
       }
       if (run.current !== token) return
       setTrades(finalTrades)
@@ -585,7 +608,7 @@ export function Exporter() {
       setProgress("")
       if (poolView) {
         void lookUpWalletFacts(chainId, poolView, finalTrades, token)
-        void lookUpHolders(chainId, poolView, finalTrades, token)
+        if (lookupHolders) void lookUpHolders(chainId, poolView, finalTrades, token)
       }
       if (lookupFunders) {
         void lookUpFunders(
@@ -1033,7 +1056,7 @@ export function Exporter() {
         let trades = saved.trades
         let repaired = false
         let stillMissing = 0
-        if (tradesNeedGasRepair(trades)) {
+        if (lookupGas && tradesNeedGasRepair(trades)) {
           const need = countMissingGas(trades)
           setProgress(
             need > 0
@@ -1329,21 +1352,48 @@ export function Exporter() {
             {phase === "loading" ? "Reading chain" : "Load swaps"}
           </Button>
         </div>
-        <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            className="mt-0.5 size-4 shrink-0 rounded border-border"
-            checked={lookupFunders}
-            disabled={phase === "loading"}
-            onChange={(event) => changeLookupFunders(event.target.checked)}
-          />
-          <span>
-            Look up <span className="text-foreground">Funded by</span> for each maker
-            <span className="block text-xs">
-              Off by default — this step is slow. Leave unchecked to save as soon as the tape (and holders) finish.
+        <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
+          <p className="text-xs">
+            Optional lookups (off by default). Leave unchecked for a faster load — you can Save as soon as the tape finishes.
+          </p>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0 rounded border-border"
+              checked={lookupGas}
+              disabled={phase === "loading"}
+              onChange={(event) => changeLookupGas(event.target.checked)}
+            />
+            <span>
+              Look up <span className="text-foreground">Gas Price</span> and{" "}
+              <span className="text-foreground">Gas Fee Total</span>
             </span>
-          </span>
-        </label>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0 rounded border-border"
+              checked={lookupHolders}
+              disabled={phase === "loading"}
+              onChange={(event) => changeLookupHolders(event.target.checked)}
+            />
+            <span>
+              Look up <span className="text-foreground">Holders</span> at each transaction
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0 rounded border-border"
+              checked={lookupFunders}
+              disabled={phase === "loading"}
+              onChange={(event) => changeLookupFunders(event.target.checked)}
+            />
+            <span>
+              Look up <span className="text-foreground">Funded by</span> for each maker
+            </span>
+          </label>
+        </div>
       </form>
 
       {savedOpen ? (
@@ -1683,13 +1733,11 @@ export function Exporter() {
                 variant="outline"
                 className="h-11"
                 onClick={() => void persistAnalysis()}
-                disabled={rawTrades.length === 0 || saveBusy || phase === "loading" || holdersBusy}
+                disabled={rawTrades.length === 0 || saveBusy || phase === "loading"}
                 title={
-                  holdersBusy
-                    ? "Wait until holder counts finish so the save includes them."
-                    : funding
-                      ? "Funded-by lookup is still running; save will keep whatever funders are filled so far."
-                      : undefined
+                  holdersBusy || funding
+                    ? "Optional lookups still running; save keeps whatever gas, holders, and funders are filled so far."
+                    : undefined
                 }
               >
                 {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}

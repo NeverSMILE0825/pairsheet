@@ -16,7 +16,17 @@ const ROUTESCAN_PAGE = 1000
 /** Etherscan-compatible getLogs only returns page*offset ≤ 10_000 rows per query window. */
 const MAX_LOG_PAGE = 10
 
-export async function getSwapPage(rawUrl: string, cursorText: string | null): Promise<SwapsResponse> {
+export type SwapPageOptions = {
+  /** When false, skip receipt fetches used for Gas Price / Gas Fee Total (faster loads). Default true. */
+  includeGas?: boolean
+}
+
+export async function getSwapPage(
+  rawUrl: string,
+  cursorText: string | null,
+  options: SwapPageOptions = {},
+): Promise<SwapsResponse> {
+  const includeGas = options.includeGas !== false
   let parsed: ReturnType<typeof parseDextoolsUrl>
   try {
     parsed = parseDextoolsUrl(rawUrl)
@@ -46,7 +56,7 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
 
   const chain = parsed.chain
   const page = await readPage(parsed.chain, pool, topic, cursor)
-  let trades = await hydrate(parsed.chain, pool, page.logs)
+  let trades = await hydrate(parsed.chain, pool, page.logs, includeGas)
   let next = page.next
   let activeTopic = topic
 
@@ -56,7 +66,7 @@ export async function getSwapPage(rawUrl: string, cursorText: string | null): Pr
       tried.add(alternate)
       const retry = await readPage(parsed.chain, pool, alternate, null)
       if (retry.logs.length > 0 || retry.next) {
-        trades = await hydrate(parsed.chain, pool, retry.logs)
+        trades = await hydrate(parsed.chain, pool, retry.logs, includeGas)
         next = retry.next
         activeTopic = alternate
         break
@@ -316,7 +326,12 @@ function blockscoutLog(item: Record<string, unknown>, topic: string): RawLog | n
   }
 }
 
-async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): Promise<Trade[]> {
+async function hydrate(
+  chain: ChainConfig,
+  pool: PoolContext,
+  logs: RawLog[],
+  includeGas = true,
+): Promise<Trade[]> {
   const decoded = logs.flatMap((log) => {
     const swap = decodeSwap(log, pool)
     if (!swap) return []
@@ -324,7 +339,16 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
   })
   if (decoded.length === 0) return []
 
-  const allHashes = [...new Set(decoded.map((row) => row.log.txHash.toLowerCase()))]
+  // Receipts feed gas columns and V4 ADD/REMOVE token amounts.
+  const receiptHashes = includeGas
+    ? [...new Set(decoded.map((row) => row.log.txHash.toLowerCase()))]
+    : [
+        ...new Set(
+          decoded
+            .filter((row) => row.swap.type === "ADD" || row.swap.type === "REMOVE")
+            .map((row) => row.log.txHash.toLowerCase()),
+        ),
+      ]
 
   const [makers, prices, sizes, receipts] = await Promise.all([
     resolveMakers(
@@ -343,13 +367,17 @@ async function hydrate(chain: ChainConfig, pool: PoolContext, logs: RawLog[]): P
       pool,
       decoded.map((row) => row.log),
     ).catch(() => new Map<string, PoolSize>()),
-    loadReceipts(chain, allHashes),
+    receiptHashes.length > 0
+      ? loadReceipts(chain, receiptHashes)
+      : Promise.resolve(new Map<string, LoadedReceipt>()),
   ])
 
   const gasByTx = new Map<string, ReceiptGas>()
-  for (const [hash, receipt] of receipts) {
-    const gas = parseReceiptGas(receipt.raw)
-    if (gas) gasByTx.set(hash, gas)
+  if (includeGas) {
+    for (const [hash, receipt] of receipts) {
+      const gas = parseReceiptGas(receipt.raw)
+      if (gas) gasByTx.set(hash, gas)
+    }
   }
 
   const trades = decoded.map(({ log, swap }) => {
