@@ -7,10 +7,15 @@ alwaysApply: true
 
 When finishing any user-requested code change that should appear on the live site:
 
-1. Commit the relevant files (only when the work is ready; use a clear why-focused message).
+1. Commit the relevant files (only when the work is ready).
 2. Push to `origin` `main` — that triggers `.github/workflows/pages.yml`.
 3. Confirm the Pages workflow started (`gh run list --workflow=pages.yml --limit 1`) and report the live URL: https://neversmile0825.github.io/pairsheet/
 
 Do not skip the push after substantive UI/lib changes unless the user explicitly asks not to deploy.
+
+## Commit messages must name the real change
+
+- Agent commits: say what changed and why (e.g. `Use actual V4 pool balances…`), never vague labels like `update`, `fix`, or `sync`.
+- Bookmark sync (`publishBookmarks`) writes its own GitHub commit message via `describeBookmarkSync` — add/remove/star/update pair names. It must not create a commit when the shared list is unchanged (no more repeated `Sync saved pairs (N)` no-ops).
 
 Author commits with one-off `-c user.name` / `-c user.email` matching recent repo history; never update git config.

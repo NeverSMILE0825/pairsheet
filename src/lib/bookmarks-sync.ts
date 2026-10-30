@@ -386,9 +386,125 @@ export async function validateSyncToken(
   }
 }
 
-async function putCatalog(token: string, catalog: BookmarkCatalog, sha: string): Promise<Response> {
+function pairLabel(meta: SavedAnalysisMeta): string {
+  return `${meta.baseSymbol}/${meta.quoteSymbol}`
+}
+
+/** Stable fingerprint of bookmark rows (ignores catalog.updatedAt). */
+export function bookmarkSyncFingerprint(bookmarks: SavedAnalysisMeta[]): string {
+  const normalized = [...bookmarks]
+    .map((item) => ({
+      id: item.id,
+      url: item.url,
+      savedAt: item.savedAt,
+      chainId: item.chainId,
+      address: item.address.toLowerCase(),
+      dex: item.dex,
+      baseSymbol: item.baseSymbol,
+      quoteSymbol: item.quoteSymbol,
+      tradeCount: item.tradeCount,
+      starred: Boolean(item.starred),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+  return JSON.stringify(normalized)
+}
+
+/**
+ * Git commit message for a bookmark publish. Returns null when the list is unchanged
+ * (so we skip creating another "Sync saved pairs (N)" no-op commit).
+ */
+export function describeBookmarkSync(
+  previous: SavedAnalysisMeta[],
+  next: SavedAnalysisMeta[],
+): string | null {
+  const prevMap = new Map(previous.map((item) => [item.id, item]))
+  const nextMap = new Map(next.map((item) => [item.id, item]))
+  const added: string[] = []
+  const removed: string[] = []
+  const updated: string[] = []
+  const starred: string[] = []
+  const unstarred: string[] = []
+
+  for (const [id, meta] of nextMap) {
+    const prior = prevMap.get(id)
+    if (!prior) {
+      added.push(pairLabel(meta))
+      continue
+    }
+    const starChanged = Boolean(prior.starred) !== Boolean(meta.starred)
+    const otherChanged =
+      prior.savedAt !== meta.savedAt ||
+      prior.tradeCount !== meta.tradeCount ||
+      prior.url !== meta.url ||
+      prior.baseSymbol !== meta.baseSymbol ||
+      prior.quoteSymbol !== meta.quoteSymbol ||
+      prior.dex !== meta.dex
+    if (otherChanged) {
+      updated.push(
+        meta.tradeCount !== prior.tradeCount
+          ? `${pairLabel(meta)} (${meta.tradeCount.toLocaleString("en-US")} trades)`
+          : pairLabel(meta),
+      )
+    } else if (starChanged) {
+      if (meta.starred) starred.push(pairLabel(meta))
+      else unstarred.push(pairLabel(meta))
+    }
+  }
+  for (const [id, meta] of prevMap) {
+    if (!nextMap.has(id)) removed.push(pairLabel(meta))
+  }
+
+  if (
+    added.length === 0 &&
+    removed.length === 0 &&
+    updated.length === 0 &&
+    starred.length === 0 &&
+    unstarred.length === 0
+  ) {
+    return null
+  }
+
+  if (next.length === 0 && removed.length > 0) {
+    return removed.length === 1
+      ? `Remove ${removed[0]} from shared bookmarks`
+      : `Clear shared bookmarks (${removed.length} removed)`
+  }
+
+  if (added.length === 1 && removed.length === 0 && updated.length === 0 && starred.length === 0 && unstarred.length === 0) {
+    return `Add ${added[0]} to shared bookmarks`
+  }
+  if (removed.length === 1 && added.length === 0 && updated.length === 0 && starred.length === 0 && unstarred.length === 0) {
+    return `Remove ${removed[0]} from shared bookmarks`
+  }
+  if (starred.length === 1 && added.length === 0 && removed.length === 0 && updated.length === 0 && unstarred.length === 0) {
+    return `Star ${starred[0]} on shared bookmarks`
+  }
+  if (unstarred.length === 1 && added.length === 0 && removed.length === 0 && updated.length === 0 && starred.length === 0) {
+    return `Unstar ${unstarred[0]} on shared bookmarks`
+  }
+  if (updated.length === 1 && added.length === 0 && removed.length === 0 && starred.length === 0 && unstarred.length === 0) {
+    return `Update ${updated[0]} on shared bookmarks`
+  }
+
+  const parts: string[] = []
+  if (added.length) parts.push(`add ${added.join(", ")}`)
+  if (removed.length) parts.push(`remove ${removed.join(", ")}`)
+  if (starred.length) parts.push(`star ${starred.join(", ")}`)
+  if (unstarred.length) parts.push(`unstar ${unstarred.join(", ")}`)
+  if (updated.length) parts.push(`refresh ${updated.join(", ")}`)
+  const detail = parts.join("; ")
+  if (detail.length <= 72) return `Update shared bookmarks: ${detail}`
+  return `Update shared bookmarks (${added.length} added, ${removed.length} removed, ${updated.length + starred.length + unstarred.length} changed)`
+}
+
+async function putCatalog(
+  token: string,
+  catalog: BookmarkCatalog,
+  sha: string,
+  message: string,
+): Promise<Response> {
   const body: Record<string, string> = {
-    message: `Sync saved pairs (${catalog.bookmarks.length})`,
+    message,
     content: toBase64(`${JSON.stringify(catalog, null, 2)}\n`),
     branch: "main",
   }
@@ -418,19 +534,52 @@ export async function publishBookmarks(
     throw new Error("No local saved pairs to publish. Save a pair on this browser first, then Publish now.")
   }
 
-  const catalog: BookmarkCatalog = {
-    version: 1,
-    updatedAt: new Date().toISOString(),
-    bookmarks: [...bookmarks].sort((a, b) => b.savedAt.localeCompare(a.savedAt)),
-  }
+  const bookmarksSorted = [...bookmarks].sort((a, b) => b.savedAt.localeCompare(a.savedAt))
 
   try {
-    let { sha } = await readRemoteFile(token)
-    let response = await putCatalog(token, catalog, sha)
+    let { sha, catalog: remote } = await readRemoteFile(token)
+    const unchanged =
+      bookmarkSyncFingerprint(remote.bookmarks) === bookmarkSyncFingerprint(bookmarksSorted)
+    const commitMessage = unchanged ? null : describeBookmarkSync(remote.bookmarks, bookmarksSorted)
+
+    // Same pair list as GitHub — do not bump updatedAt or open another empty commit.
+    if (!commitMessage) {
+      if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks)
+      writeSyncStatus({
+        lastOkAt: remote.updatedAt ?? new Date().toISOString(),
+        lastError: null,
+        lastCount: remote.bookmarks.length,
+        lastAction: "publish",
+        enabled: true,
+      })
+      return remote.bookmarks.length > 0
+        ? remote
+        : { version: 1, updatedAt: remote.updatedAt, bookmarks: bookmarksSorted }
+    }
+
+    const catalog: BookmarkCatalog = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      bookmarks: bookmarksSorted,
+    }
+
+    let response = await putCatalog(token, catalog, sha, commitMessage)
     // Stale sha (another publish landed) — refresh and retry once.
     if (response.status === 409) {
-      ;({ sha } = await readRemoteFile(token))
-      response = await putCatalog(token, catalog, sha)
+      ;({ sha, catalog: remote } = await readRemoteFile(token))
+      const retryMessage = describeBookmarkSync(remote.bookmarks, bookmarksSorted)
+      if (!retryMessage) {
+        if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks)
+        writeSyncStatus({
+          lastOkAt: remote.updatedAt ?? catalog.updatedAt,
+          lastError: null,
+          lastCount: remote.bookmarks.length,
+          lastAction: "publish",
+          enabled: true,
+        })
+        return remote
+      }
+      response = await putCatalog(token, catalog, sha, retryMessage)
     }
     if (!response.ok) {
       const detail = await readGithubError(response)

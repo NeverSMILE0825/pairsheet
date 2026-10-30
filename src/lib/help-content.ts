@@ -132,12 +132,17 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Open lists local snapshots plus the shared GitHub bookmark list. Shared rows reload from chain if this PC has no snapshot.",
       "Export / Import a JSON vault to move full snapshots between browsers without GitHub.",
       "Enable sync with a fine-grained GitHub PAT (Contents: Read and Write on NeverSMILE0825/pairsheet). Publish now writes public/data/bookmarks.json.",
+      "Each publish creates a Git commit only when the shared list actually changed. Messages name the change (e.g. Add GINNAN/ETH…, Remove…, Update… trades). Identical Publish now / Save syncs do not spam empty commits.",
       "Other PCs only need to open the site and click Open to see the shared list — no token required to read.",
     ],
     examples: [
       {
         title: "Cross-PC flow",
         body: "PC A: Save analysis → Enable sync → Publish now (badge shows Synced · N pair(s)). PC B: open pairsheet → Open → shared list → Open a pair to reload from chain.",
+      },
+      {
+        title: "Commit names",
+        body: "Saving GINNAN again after a new load commits “Update GINNAN/ETH (4,476 trades) on shared bookmarks”. Pressing Publish when nothing changed leaves git history alone.",
       },
     ],
   },
