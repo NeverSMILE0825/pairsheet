@@ -8,8 +8,9 @@ type TinyAmountProps = {
 }
 
 /**
- * Renders tiny prices as 0.0₈123 with a bold, enlarged zero-count so the
- * subscript-style digit stays readable in table mono text.
+ * Tiny prices as 0.0₈123. The zero-count uses a normal digit (not Unicode
+ * subscript glyphs), sized a bit above the old tiny subscripts so it stays
+ * readable without a heavy badge.
  */
 export function TinyAmount({ value, prefix = "", className }: TinyAmountProps) {
   if (value === null || value === undefined || value === "") return "—"
@@ -26,16 +27,16 @@ export function TinyAmount({ value, prefix = "", className }: TinyAmountProps) {
     )
   }
   return (
-    <span className={`inline-flex items-baseline whitespace-nowrap tabular-nums ${className ?? ""}`}>
+    <span className={`whitespace-nowrap tabular-nums ${className ?? ""}`}>
       {prefix}
       {parts.sign}
       0.0
-      <span
-        className="mx-px inline-flex min-w-[0.75em] translate-y-[0.08em] items-center justify-center rounded-sm bg-foreground/10 px-0.5 text-[1.2em] font-extrabold leading-none text-foreground"
+      <sub
+        className="bottom-0 mx-px text-[0.92em] font-bold leading-none text-foreground"
         title={`${parts.zeros} zero${parts.zeros === 1 ? "" : "s"} after the decimal`}
       >
         {parts.zeros}
-      </span>
+      </sub>
       {parts.significant}
     </span>
   )

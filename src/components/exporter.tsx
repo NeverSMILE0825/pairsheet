@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
@@ -368,12 +368,12 @@ export function Exporter() {
         }
         setGasBusy(true)
         setProgress(
-          `Filling gas fees for ${countMissingGas(rawTrades).toLocaleString("en-US") || rawTrades.length.toLocaleString("en-US")} transactions…`,
+          `Filling gas fees for ${countMissingGas(rawTrades).toLocaleString("en-US") || rawTrades.length.toLocaleString("en-US")} transactionsâ€¦`,
         )
         const result = await repairTradeGas(rawTrades, chain.rpcs, (progress) => {
           if (run.current !== token) return
           setProgress(
-            `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+            `Filling gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
           )
         })
         if (run.current !== token) return
@@ -627,7 +627,7 @@ export function Exporter() {
     const token = run.current
     setPhase("loading")
     resetViewState()
-    setProgress("Reading transactions from the chain…")
+    setProgress("Reading transactions from the chainâ€¦")
 
     try {
       let cursor: string | null = null
@@ -662,7 +662,7 @@ export function Exporter() {
         setTrades([...loaded])
         setProgress(
           body.nextCursor
-            ? `Loaded ${loaded.length.toLocaleString("en-US")} transactions. Still reading the chain…`
+            ? `Loaded ${loaded.length.toLocaleString("en-US")} transactions. Still reading the chainâ€¦`
             : `Loaded ${loaded.length.toLocaleString("en-US")} transactions.`,
         )
         cursor = body.nextCursor
@@ -678,12 +678,12 @@ export function Exporter() {
         const chain = getChain(chainId)
         if (chain && chain.id !== "solana" && countMissingGas(finalTrades) > 0) {
           setProgress(
-            `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactions…`,
+            `Filling gas fees for ${countMissingGas(finalTrades).toLocaleString("en-US")} transactionsâ€¦`,
           )
           const result = await repairTradeGas(finalTrades, chain.rpcs, (progress) => {
             if (run.current !== token) return
             setProgress(
-              `Filling gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+              `Filling gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
             )
           })
           if (run.current !== token) return
@@ -1000,7 +1000,7 @@ export function Exporter() {
     const hi = Math.max(from, to)
     const matches = trades.filter((trade) => trade.txNo >= lo && trade.txNo <= hi)
     if (matches.length === 0) {
-      setNoError(`No transactions with No ${lo.toLocaleString("en-US")}–${hi.toLocaleString("en-US")}.`)
+      setNoError(`No transactions with No ${lo.toLocaleString("en-US")}—${hi.toLocaleString("en-US")}.`)
       return
     }
     changeSelection((draft) => {
@@ -1133,7 +1133,7 @@ export function Exporter() {
         await refreshSavedList()
         setSyncStatus(getSyncStatus())
         flashNotice(
-          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open → Enable sync (or Export) to use it on Edge / other PCs.`,
+          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open â†’ Enable sync (or Export) to use it on Edge / other PCs.`,
           "ok",
         )
       }
@@ -1153,7 +1153,7 @@ export function Exporter() {
     const token = run.current
     setPhase("loading")
     resetViewState()
-    setProgress("Opening saved analysis…")
+    setProgress("Opening saved analysisâ€¦")
     try {
       const saved = await loadSavedAnalysis(id)
       if (saved) {
@@ -1169,15 +1169,15 @@ export function Exporter() {
           const need = countMissingGas(trades)
           setProgress(
             need > 0
-              ? `Refreshing gas fees for ${need.toLocaleString("en-US")} transactions…`
-              : "Refreshing gas fee formatting…",
+              ? `Refreshing gas fees for ${need.toLocaleString("en-US")} transactionsâ€¦`
+              : "Refreshing gas fee formattingâ€¦",
           )
           const chain = getChain(saved.pool.chainId)
           const rpcs = chain && chain.id !== "solana" ? chain.rpcs : null
           const result = await repairTradeGas(trades, rpcs, (progress) => {
             if (run.current !== token) return
             setProgress(
-              `Refreshing gas fees… ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
+              `Refreshing gas feesâ€¦ ${progress.done.toLocaleString("en-US")} / ${progress.total.toLocaleString("en-US")} receipts (pass ${progress.round})`,
             )
           })
           if (run.current !== token) return
@@ -1208,7 +1208,7 @@ export function Exporter() {
       if (!meta?.url) throw new Error("That saved analysis is no longer available.")
       setUrl(meta.url)
       flashNotice(
-        `Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)…`,
+        `Loading ${meta.baseSymbol} / ${meta.quoteSymbol} from chain (no local snapshot on this browser)â€¦`,
         "info",
       )
       await load(meta.url)
@@ -1327,7 +1327,7 @@ export function Exporter() {
       clearSync()
       setSyncEnabled(false)
       setSyncStatus(getSyncStatus())
-      setSyncMessage("Not synced · this browser only.")
+      setSyncMessage("Not synced Â· this browser only.")
       return
     }
     setSyncBusy(true)
@@ -1356,7 +1356,7 @@ export function Exporter() {
       setSyncMessage(
         `Synced ${catalog.bookmarks.length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
       )
-      flashNotice(`Cloud sync is on · ${catalog.bookmarks.length} pair(s) on the shared list.`, "ok")
+      flashNotice(`Cloud sync is on Â· ${catalog.bookmarks.length} pair(s) on the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
@@ -1384,7 +1384,7 @@ export function Exporter() {
         setSyncMessage("Shared list is still empty after publish. Save pairs on this browser, then try again.")
         return
       }
-      setSyncMessage(`Synced · ${catalog.bookmarks.length} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
+      setSyncMessage(`Synced Â· ${catalog.bookmarks.length} pair(s) Â· ${formatSyncAgo(status.lastOkAt)}`)
       flashNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
@@ -1428,7 +1428,7 @@ export function Exporter() {
             id="pair-url"
             value={url}
             onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://www.dextools.io/app/ether/pair-explorer/0x…"
+            placeholder="https://www.dextools.io/app/ether/pair-explorer/0xâ€¦"
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
@@ -1514,7 +1514,7 @@ export function Exporter() {
                   disabled={phase === "loading"}
                   onChange={(event) => row.onChange(event.target.checked)}
                 />
-                <span className="min-w-0">Include on Load swaps · {row.label}</span>
+                <span className="min-w-0">Include on Load swaps Â· {row.label}</span>
               </label>
               <Button
                 type="button"
@@ -1525,7 +1525,7 @@ export function Exporter() {
                 onClick={() => setConfirmExtra(row.kind)}
               >
                 {row.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                {row.busy ? "Loading…" : "Load"}
+                {row.busy ? "Loadingâ€¦" : "Load"}
               </Button>
             </div>
           ))}
@@ -1577,12 +1577,12 @@ export function Exporter() {
                     }`}
                   />
                   {syncBusy
-                    ? "Syncing with GitHub…"
+                    ? "Syncing with GitHubâ€¦"
                     : isSyncSuccessful(syncStatus)
-                      ? `Synced · ${syncStatus.lastCount} pair(s) · ${formatSyncAgo(syncStatus.lastOkAt)}`
+                      ? `Synced Â· ${syncStatus.lastCount} pair(s) Â· ${formatSyncAgo(syncStatus.lastOkAt)}`
                       : syncStatus.lastError
-                        ? "Not synced · publish failed"
-                        : "Not synced · this browser only"}
+                        ? "Not synced Â· publish failed"
+                        : "Not synced Â· this browser only"}
                 </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close saved pairs" onClick={() => setSavedOpen(false)}>
@@ -1662,7 +1662,7 @@ export function Exporter() {
                   type="password"
                   value={syncTokenDraft}
                   onChange={(event) => setSyncTokenDraft(event.target.value)}
-                  placeholder="github_pat_…"
+                  placeholder="github_pat_â€¦"
                   autoComplete="off"
                   spellCheck={false}
                   className="h-9 font-mono text-xs"
@@ -1730,8 +1730,8 @@ export function Exporter() {
                               <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
-                              {local ? " · this browser" : " · shared list"}
+                              {item.tradeCount.toLocaleString("en-US")} txs Â· saved {formatSavedAt(item.savedAt)}
+                              {local ? " Â· this browser" : " Â· shared list"}
                             </p>
                           </div>
                         </div>
@@ -1816,11 +1816,11 @@ export function Exporter() {
 
       {phase === "loading" || gasBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
-          {progress || (gasBusy ? "Filling gas fees…" : "")}
+          {progress || (gasBusy ? "Filling gas feesâ€¦" : "")}
         </p>
       ) : holdersBusy ? (
         <p className="text-sm text-muted-foreground" role="status">
-          Counting exact base-token holders at each transaction…
+          Counting exact base-token holders at each transactionâ€¦
         </p>
       ) : funding ? (
         <p className="text-sm text-muted-foreground" role="status">
@@ -1848,7 +1848,7 @@ export function Exporter() {
             <p className="mt-2 text-sm text-muted-foreground">
               {EXTRA_LOOKUP_COPY[confirmExtra].body}
               {pool
-                ? ` Currently loaded: ${pool.baseSymbol} / ${pool.quoteSymbol} · ${rawTrades.length.toLocaleString("en-US")} transactions.`
+                ? ` Currently loaded: ${pool.baseSymbol} / ${pool.quoteSymbol} Â· ${rawTrades.length.toLocaleString("en-US")} transactions.`
                 : ""}
             </p>
             <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -1919,12 +1919,12 @@ export function Exporter() {
                 }
               >
                 {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
-                {saveBusy ? "Saving…" : "Save analysis"}
+                {saveBusy ? "Savingâ€¦" : "Save analysis"}
               </Button>
               <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0}>
                 <Download />
                 Download CSV
-                {filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}
+                {filtered.length > 0 ? ` Â· ${filtered.length.toLocaleString("en-US")}` : ""}
               </Button>
             </div>
           </div>
@@ -1976,7 +1976,7 @@ export function Exporter() {
             </div>
             {tableView === "minutes" ? (
               <p className="text-sm text-muted-foreground">
-                Deep Analysis · buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
+                Deep Analysis Â· buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, gas, and funders.</p>
@@ -2246,8 +2246,8 @@ export function Exporter() {
                 }
               >
                 {showSelectedOnly
-                  ? `Show all${filtered.length > 0 ? ` · ${filtered.length.toLocaleString("en-US")}` : ""}`
-                  : `Show selected${selected.size > 0 ? ` · ${selected.size.toLocaleString("en-US")}` : ""}`}
+                  ? `Show all${filtered.length > 0 ? ` Â· ${filtered.length.toLocaleString("en-US")}` : ""}`
+                  : `Show selected${selected.size > 0 ? ` Â· ${selected.size.toLocaleString("en-US")}` : ""}`}
               </Button>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <DateTimeField
@@ -2307,7 +2307,7 @@ export function Exporter() {
                 <span>
                   Showing {filtered.length.toLocaleString("en-US")} transaction{filtered.length === 1 ? "" : "s"} from{" "}
                   <span className="font-mono text-foreground">{formatParts(dateToParts(new Date(period.startMs), zone))}</span>
-                  {" – "}
+                  {" — "}
                   <span className="font-mono text-foreground">{formatParts(dateToParts(new Date(period.endMs), zone))}</span>
                   {" "}({zoneName})
                 </span>
@@ -2475,23 +2475,23 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showDa("startPriceUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                          <td className="px-3 py-2 text-right font-mono text-sm">
                             {row.startPriceUsd ? <TinyAmount value={row.startPriceUsd} prefix="$" /> : "—"}
                           </td>
                         ) : null}
                         {showDa("endPriceUsd") ? (
-                          <td className={`px-3 py-2 text-right font-mono text-[13px] ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
+                          <td className={`px-3 py-2 text-right font-mono text-sm ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
                             {row.endPriceUsd ? <TinyAmount value={row.endPriceUsd} prefix="$" /> : "—"}
                           </td>
                         ) : null}
                         {showDa("startHolders") ? (
                           <td className="px-3 py-2 text-right font-mono text-xs tabular-nums">
-                            {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                            {row.startHolders !== null ? row.startHolders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
                           </td>
                         ) : null}
                         {showDa("endHolders") ? (
                           <td className={`px-3 py-2 text-right font-mono text-xs tabular-nums ${changeTone(row.startHolders, row.endHolders)}`}>
-                            {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                            {row.endHolders !== null ? row.endHolders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
                           </td>
                         ) : null}
                         {showDa("endGasPriceGwei") ? (
@@ -2601,7 +2601,7 @@ export function Exporter() {
                     <tr>
                       <td colSpan={Math.max(1, txColCount + 1)} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
-                          ? "Reading pool logs…"
+                          ? "Reading pool logsâ€¦"
                           : trades.length === 0
                             ? "No Uniswap-style transactions were found on this pool."
                             : "Nothing matches this filter."}
@@ -2634,7 +2634,7 @@ export function Exporter() {
                         </td>
                         {showTx("txNo") ? (
                           <td
-                            className="cursor-pointer px-3 py-2 text-right font-mono text-[13px] text-muted-foreground tabular-nums hover:text-foreground"
+                            className="cursor-pointer px-3 py-2 text-right font-mono text-sm text-muted-foreground tabular-nums hover:text-foreground"
                             title="Transaction number (oldest = 1). Click to check/uncheck this row."
                             onClick={(event) => selectTrade(trade, event.shiftKey)}
                           >
@@ -2642,7 +2642,7 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("timestamp") ? (
-                          <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
+                          <td className="px-3 py-2 font-mono text-sm whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
                         ) : null}
                         {showTx("type") ? (
                           <td className="px-3 py-2">
@@ -2652,17 +2652,17 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("priceUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                          <td className="px-3 py-2 text-right font-mono text-sm">
                             {trade.priceUsd ? <TinyAmount value={trade.priceUsd} prefix="$" /> : "—"}
                           </td>
                         ) : null}
                         {showTx("marketCapUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.marketCapUsd ?? "Market cap unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-sm" title={trade.marketCapUsd ?? "Market cap unavailable"}>
                             {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
                           </td>
                         ) : null}
                         {showTx("totalUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                          <td className="px-3 py-2 text-right font-mono text-sm">
                             <span className="inline-flex items-center justify-end gap-1.5">
                               <UsdAmount amount={trade.totalUsd} />
                               <TradeSizeIcon usd={trade.totalUsd} />
@@ -2670,39 +2670,39 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("priceQuote") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                          <td className="px-3 py-2 text-right font-mono text-sm">
                             {trade.priceQuote ? <TinyAmount value={trade.priceQuote} /> : "—"}
                           </td>
                         ) : null}
                         {showTx("baseAmount") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={formatGroupedAmount(trade.baseAmount)}>
+                          <td className="px-3 py-2 text-right font-mono text-sm" title={formatGroupedAmount(trade.baseAmount)}>
                             {formatIntegerAmount(trade.baseAmount)}
                           </td>
                         ) : null}
                         {showTx("quoteAmount") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]">{formatGroupedAmount(trade.quoteAmount)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-sm">{formatGroupedAmount(trade.quoteAmount)}</td>
                         ) : null}
                         {showTx("baseReserve") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.baseReserve ?? "Pool size unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-sm" title={trade.baseReserve ?? "Pool size unavailable"}>
                             {trade.baseReserve ? formatIntegerAmount(trade.baseReserve) : "—"}
                           </td>
                         ) : null}
                         {showTx("quoteReserve") ? (
-                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.quoteReserve ?? "Pool size unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-sm" title={trade.quoteReserve ?? "Pool size unavailable"}>
                             {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
                           </td>
                         ) : null}
                         {showTx("holders") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-sm tabular-nums"
                             title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
                           >
-                            {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
+                            {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "â€¦" : "—"}
                           </td>
                         ) : null}
                         {showTx("gasPriceGwei") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-sm tabular-nums"
                             title={
                               displayGwei(trade.gasPriceGwei)
                                 ? `${displayGwei(trade.gasPriceGwei)} gwei effective gas price (receipt base + priority). Not the network gas-tracker average.`
@@ -2714,7 +2714,7 @@ export function Exporter() {
                         ) : null}
                         {showTx("gasFeeTotalEth") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-sm tabular-nums"
                             title={
                               trade.gasFeeTotalEth
                                 ? `${trade.gasFeeTotalEth} ETH cumulative gas through this row (unique tx hashes only)`
@@ -2729,7 +2729,7 @@ export function Exporter() {
                             {trade.maker ? (
                               <>
                                 <a
-                                  className="font-mono text-[13px] hover:text-primary"
+                                  className="font-mono text-sm hover:text-primary"
                                   href={`${pool.explorerAddress}/${trade.maker}`}
                                   target="_blank"
                                   rel="noreferrer"
@@ -2760,7 +2760,7 @@ export function Exporter() {
                           <td className="px-3 py-2">
                             {trade.fundedBy && trade.fundedByAddress ? (
                               <a
-                                className="text-[13px] font-medium text-rose-300 hover:text-rose-200"
+                                className="text-sm font-medium text-rose-300 hover:text-rose-200"
                                 href={`${pool.explorerAddress}/${trade.fundedByAddress}`}
                                 target="_blank"
                                 rel="noreferrer"
@@ -2786,7 +2786,7 @@ export function Exporter() {
                               {trade.makerTags.includes("team") ? (
                                 <span
                                   className="text-amber-400"
-                                  title="Team wallet: deployed this token or added the pool’s first liquidity."
+                                  title="Team wallet: deployed this token or added the poolâ€™s first liquidity."
                                 >
                                   <Users className="size-4" aria-label="Team wallet" />
                                 </span>
@@ -2817,7 +2817,7 @@ export function Exporter() {
             className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 text-sm ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between"
           >
             <p className="text-muted-foreground" aria-live="polite">
-              Showing {firstShown.toLocaleString("en-US")}–{lastShown.toLocaleString("en-US")} of{" "}
+              Showing {firstShown.toLocaleString("en-US")}—{lastShown.toLocaleString("en-US")} of{" "}
               {listLength.toLocaleString("en-US")}
               {tableView === "minutes" ? ` intervals (${intervalLabel})` : ""}
             </p>
@@ -2877,7 +2877,7 @@ export function Exporter() {
       ) : phase === "idle" || phase === "error" ? (
         <section className="grid gap-3 sm:grid-cols-3">
           <Step n="1" title="Paste the pair" body="Use the pair-explorer URL from DEXTools, including the chain and pool address." />
-          <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the pool’s logs, with the wallet that sent each transaction and the pool size after it." />
+          <Step n="2" title="Read the tape" body="Buys, sells, adds and removes are decoded from the poolâ€™s logs, with the wallet that sent each transaction and the pool size after it." />
           <Step n="3" title="Save the CSV" body="Date, type, USD price, total, both token amounts, pool size, holders, maker, who funded that wallet, and transaction hash." />
         </section>
       ) : null}
@@ -3095,3 +3095,4 @@ function LedgerMark() {
     </svg>
   )
 }
+
