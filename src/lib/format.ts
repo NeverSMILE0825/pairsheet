@@ -229,24 +229,38 @@ function compactMagnitude(abs: number): string | null {
   return null
 }
 
-export function formatTiny(value: number, digits = 4): string {
-  if (!Number.isFinite(value)) return "—"
+export type TinyParts =
+  | { kind: "plain"; sign: string; text: string }
+  | { kind: "compact"; sign: string; zeros: number; significant: string }
+
+/** Structured tiny amount for UI (enlarged zero-count digit). */
+export function formatTinyParts(value: number, digits = 4): TinyParts | null {
+  if (!Number.isFinite(value)) return null
   const sign = value < 0 ? "-" : ""
   const abs = Math.abs(value)
-  if (abs === 0) return "0"
+  if (abs === 0) return { kind: "plain", sign, text: "0" }
   if (abs >= 0.0001) {
-    return (
-      sign +
-      abs.toLocaleString("en-US", {
+    return {
+      kind: "plain",
+      sign,
+      text: abs.toLocaleString("en-US", {
         maximumFractionDigits: abs >= 1 ? 4 : 6,
-      })
-    )
+      }),
+    }
   }
   const exponent = Math.floor(Math.log10(abs))
   const zeros = -exponent - 1
   const mantissa = (abs * 10 ** (zeros + 1)).toFixed(digits - 1).replace(".", "")
   const significant = mantissa.replace(/0+$/, "") || "0"
-  return `${sign}0.0${toSubscript(zeros)}${significant}`
+  return { kind: "compact", sign, zeros, significant }
+}
+
+/** Plain-string form (CSV, titles). UI should prefer formatTinyParts + enlarged zero count. */
+export function formatTiny(value: number, digits = 4): string {
+  const parts = formatTinyParts(value, digits)
+  if (!parts) return "—"
+  if (parts.kind === "plain") return `${parts.sign}${parts.text}`
+  return `${parts.sign}0.0${toSubscript(parts.zeros)}${parts.significant}`
 }
 
 function toSubscript(value: number): string {

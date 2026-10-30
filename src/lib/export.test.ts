@@ -22,6 +22,7 @@ import {
   formatIntegerAmount,
   formatPoolSize,
   formatTiny,
+  formatTinyParts,
   priceInQuote,
   marketCapFromPrice,
   priceUsdFromTotal,
@@ -328,6 +329,13 @@ test("shows the base token column as a whole number", () => {
 
 test("formats tiny prices with subscript zeros", () => {
   assert.equal(formatTiny(0.0000000001263), "0.0₉1263")
+  assert.deepEqual(formatTinyParts(0.0000000001263), {
+    kind: "compact",
+    sign: "",
+    zeros: 9,
+    significant: "1263",
+  })
+  assert.deepEqual(formatTinyParts(0.0123), { kind: "plain", sign: "", text: "0.0123" })
   assert.equal(formatTradeDate("2024-08-04T15:54:23.000Z"), "Aug 4 24 15:54:23")
 })
 

@@ -7,6 +7,7 @@ import { HelpDialogButton } from "@/components/help-dialog"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
+import { TinyAmount } from "@/components/tiny-amount"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -43,7 +44,6 @@ import {
   changeTone,
   formatPoolSize,
   formatIncome,
-  formatTiny,
   formatUsd,
   formatUsdInteger,
   normalizeAddress,
@@ -2475,13 +2475,13 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showDa("startPriceUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs">
-                            {row.startPriceUsd ? `$${formatTiny(Number(row.startPriceUsd))}` : "—"}
+                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                            {row.startPriceUsd ? <TinyAmount value={row.startPriceUsd} prefix="$" /> : "—"}
                           </td>
                         ) : null}
                         {showDa("endPriceUsd") ? (
-                          <td className={`px-3 py-2 text-right font-mono text-xs ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
-                            {row.endPriceUsd ? `$${formatTiny(Number(row.endPriceUsd))}` : "—"}
+                          <td className={`px-3 py-2 text-right font-mono text-[13px] ${changeTone(row.startPriceUsd, row.endPriceUsd)}`}>
+                            {row.endPriceUsd ? <TinyAmount value={row.endPriceUsd} prefix="$" /> : "—"}
                           </td>
                         ) : null}
                         {showDa("startHolders") ? (
@@ -2634,7 +2634,7 @@ export function Exporter() {
                         </td>
                         {showTx("txNo") ? (
                           <td
-                            className="cursor-pointer px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums hover:text-foreground"
+                            className="cursor-pointer px-3 py-2 text-right font-mono text-[13px] text-muted-foreground tabular-nums hover:text-foreground"
                             title="Transaction number (oldest = 1). Click to check/uncheck this row."
                             onClick={(event) => selectTrade(trade, event.shiftKey)}
                           >
@@ -2642,7 +2642,7 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("timestamp") ? (
-                          <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
+                          <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap">{formatTradeDate(trade.timestamp, zone)}</td>
                         ) : null}
                         {showTx("type") ? (
                           <td className="px-3 py-2">
@@ -2652,45 +2652,49 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("priceUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceUsd ? `$${formatTiny(Number(trade.priceUsd))}` : "—"}</td>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                            {trade.priceUsd ? <TinyAmount value={trade.priceUsd} prefix="$" /> : "—"}
+                          </td>
                         ) : null}
                         {showTx("marketCapUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.marketCapUsd ?? "Market cap unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.marketCapUsd ?? "Market cap unavailable"}>
                             {trade.marketCapUsd ? formatUsd(trade.marketCapUsd) : "—"}
                           </td>
                         ) : null}
                         {showTx("totalUsd") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs">
+                          <td className="px-3 py-2 text-right font-mono text-[13px]">
                             <span className="inline-flex items-center justify-end gap-1.5">
-                              {formatUsd(trade.totalUsd)}
+                              <UsdAmount amount={trade.totalUsd} />
                               <TradeSizeIcon usd={trade.totalUsd} />
                             </span>
                           </td>
                         ) : null}
                         {showTx("priceQuote") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs">{trade.priceQuote ? formatTiny(Number(trade.priceQuote)) : "—"}</td>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]">
+                            {trade.priceQuote ? <TinyAmount value={trade.priceQuote} /> : "—"}
+                          </td>
                         ) : null}
                         {showTx("baseAmount") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs" title={formatGroupedAmount(trade.baseAmount)}>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={formatGroupedAmount(trade.baseAmount)}>
                             {formatIntegerAmount(trade.baseAmount)}
                           </td>
                         ) : null}
                         {showTx("quoteAmount") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs">{formatGroupedAmount(trade.quoteAmount)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]">{formatGroupedAmount(trade.quoteAmount)}</td>
                         ) : null}
                         {showTx("baseReserve") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.baseReserve ?? "Pool size unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.baseReserve ?? "Pool size unavailable"}>
                             {trade.baseReserve ? formatIntegerAmount(trade.baseReserve) : "—"}
                           </td>
                         ) : null}
                         {showTx("quoteReserve") ? (
-                          <td className="px-3 py-2 text-right font-mono text-xs" title={trade.quoteReserve ?? "Pool size unavailable"}>
+                          <td className="px-3 py-2 text-right font-mono text-[13px]" title={trade.quoteReserve ?? "Pool size unavailable"}>
                             {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
                           </td>
                         ) : null}
                         {showTx("holders") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
                             title={trade.holders !== null ? `${trade.holders.toLocaleString("en-US")} holders after this trade` : "Holder count unavailable"}
                           >
                             {trade.holders !== null ? trade.holders.toLocaleString("en-US") : holdersBusy ? "…" : "—"}
@@ -2698,7 +2702,7 @@ export function Exporter() {
                         ) : null}
                         {showTx("gasPriceGwei") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
                             title={
                               displayGwei(trade.gasPriceGwei)
                                 ? `${displayGwei(trade.gasPriceGwei)} gwei effective gas price (receipt base + priority). Not the network gas-tracker average.`
@@ -2710,7 +2714,7 @@ export function Exporter() {
                         ) : null}
                         {showTx("gasFeeTotalEth") ? (
                           <td
-                            className="px-3 py-2 text-right font-mono text-xs tabular-nums"
+                            className="px-3 py-2 text-right font-mono text-[13px] tabular-nums"
                             title={
                               trade.gasFeeTotalEth
                                 ? `${trade.gasFeeTotalEth} ETH cumulative gas through this row (unique tx hashes only)`
@@ -2725,7 +2729,7 @@ export function Exporter() {
                             {trade.maker ? (
                               <>
                                 <a
-                                  className="font-mono text-xs hover:text-primary"
+                                  className="font-mono text-[13px] hover:text-primary"
                                   href={`${pool.explorerAddress}/${trade.maker}`}
                                   target="_blank"
                                   rel="noreferrer"
@@ -2756,7 +2760,7 @@ export function Exporter() {
                           <td className="px-3 py-2">
                             {trade.fundedBy && trade.fundedByAddress ? (
                               <a
-                                className="text-xs font-medium text-rose-300 hover:text-rose-200"
+                                className="text-[13px] font-medium text-rose-300 hover:text-rose-200"
                                 href={`${pool.explorerAddress}/${trade.fundedByAddress}`}
                                 target="_blank"
                                 rel="noreferrer"
@@ -2905,6 +2909,16 @@ function polishTape(pool: PoolView, trades: Trade[]): Trade[] {
   const v4 = isPoolId(pool.address) || /uniswap\s*v4|(^|[^0-9])v4([^0-9]|$)/i.test(pool.dex)
   if (!v4) return trades
   return finalizeV4Tape(trades, pool.baseTotalSupply)
+}
+
+/** USD with enlarged zero-count for sub-$1 amounts that need compact notation. */
+function UsdAmount({ amount }: { amount: string | null }) {
+  if (!amount) return "—"
+  const value = Number(amount)
+  if (!Number.isFinite(value)) return "—"
+  if (value === 0) return "$0"
+  if (Math.abs(value) >= 1) return formatUsd(amount)
+  return <TinyAmount value={value} prefix="$" />
 }
 
 function tagWeight(trade: Trade): number {
