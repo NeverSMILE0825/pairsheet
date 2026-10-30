@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-30T10:23:49.355Z",
+  "updatedAt": "2026-10-30T10:23:52.734Z",
   "bookmarks": [
     {
-      "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "savedAt": "2026-10-30T09:01:39.118Z",
+      "id": "ether:0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "savedAt": "2026-10-30T10:07:50.561Z",
       "chainId": "ether",
       "chainName": "Ethereum",
-      "address": "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "dex": "Uniswap V4 (Ethereum)",
-      "baseSymbol": "GINNAN",
-      "quoteSymbol": "ETH",
-      "tradeCount": 4477,
-      "starred": true
+      "address": "0x8d420dc28424bcbb1cd6d200c66fe88397938fb8",
+      "dex": "Uniswap V2",
+      "baseSymbol": "Cheyenne",
+      "quoteSymbol": "WETH",
+      "tradeCount": 242,
+      "starred": false
     },
     {
       "id": "ether:0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
