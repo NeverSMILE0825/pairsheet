@@ -255,7 +255,11 @@ export function priceQuoteFromV4InitLogs(
   return null
 }
 
-/** Sum ERC-20 transfers of base/quote to or from the V4 PoolManager in a receipt. */
+/**
+ * Sum ERC-20 transfers of base/quote to or from the V4 PoolManager in a receipt.
+ * Falls back when liquidity math is unavailable. Subtracts same-tx Swap deltas so a
+ * bundled buy does not inflate ADD quote (DEXTools shows 0 WETH on one-sided adds).
+ */
 export function amountsFromV4Receipt(
   pool: PoolContext,
   type: "ADD" | "REMOVE",
@@ -266,6 +270,7 @@ export function amountsFromV4Receipt(
   const manager = pool.logAddress.toLowerCase()
   const base = pool.base.address.toLowerCase()
   const quote = pool.quote.address.toLowerCase()
+  const poolId = (pool.topic1 || "").toLowerCase()
 
   for (const log of receiptLogs) {
     if (!log.address || !Array.isArray(log.topics) || log.topics.length < 3 || typeof log.data !== "string") continue
@@ -288,6 +293,23 @@ export function amountsFromV4Receipt(
     if (token === base) baseRaw += amount
     if (token === quote) quoteRaw += amount
   }
+
+  // Strip swap-leg transfers that share the unlock/tx with this ModifyLiquidity.
+  for (const log of receiptLogs) {
+    if (!Array.isArray(log.topics) || typeof log.data !== "string") continue
+    if ((log.topics[0] || "").toLowerCase() !== SWAP_V4_TOPIC) continue
+    if (poolId && (log.topics[1] || "").toLowerCase() !== poolId) continue
+    const flow = flowsV4(log.data, pool)
+    if (type === "ADD") {
+      baseRaw -= flow.baseIn
+      quoteRaw -= flow.quoteIn
+    } else {
+      baseRaw -= flow.baseOut
+      quoteRaw -= flow.quoteOut
+    }
+  }
+  if (baseRaw < 0n) baseRaw = 0n
+  if (quoteRaw < 0n) quoteRaw = 0n
 
   // Native currency has no ERC-20 Transfer — leave 0 (DEXTools shows 0 ETH on one-sided adds).
   return { baseRaw, quoteRaw }

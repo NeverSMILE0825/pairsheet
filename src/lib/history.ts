@@ -8,6 +8,7 @@ import {
   priceQuoteFromV4InitLogs,
   topicOrder,
 } from "./decode"
+import { amountsFromV4LiquidityMath } from "./v4-liquidity"
 import {
   formatUnits,
   marketCapFromPrice,
@@ -465,7 +466,11 @@ async function hydrate(
     const receipt = receipts.get(log.txHash.toLowerCase())
     const filled =
       pool.style === "v4" && (swap.type === "ADD" || swap.type === "REMOVE") && receipt?.logs
-        ? { ...swap, ...amountsFromV4Receipt(pool, swap.type, receipt.logs) }
+        ? {
+            ...swap,
+            ...(amountsFromV4LiquidityMath(pool, log.data, log.logIndex, receipt.logs) ??
+              amountsFromV4Receipt(pool, swap.type, receipt.logs)),
+          }
         : swap
     const quotePrice = prices.get(log.timestamp) ?? null
     const size = sizes.get(`${log.txHash.toLowerCase()}-${log.logIndex}`)
@@ -511,7 +516,7 @@ async function hydrate(
 
 type LoadedReceipt = {
   raw: unknown
-  logs: { address?: string; topics?: string[]; data?: string }[]
+  logs: { address?: string; topics?: string[]; data?: string; logIndex?: number | string }[]
 }
 
 async function loadReceipts(chain: ChainConfig, hashes: string[]): Promise<Map<string, LoadedReceipt>> {
@@ -520,7 +525,9 @@ async function loadReceipts(chain: ChainConfig, hashes: string[]): Promise<Map<s
   const raw = await fetchEthReceipts(chain.rpcs, hashes)
   for (const [hash, receipt] of raw) {
     if (!receipt || typeof receipt !== "object") continue
-    const logs = (receipt as { logs?: { address?: string; topics?: string[]; data?: string }[] }).logs
+    const logs = (
+      receipt as { logs?: { address?: string; topics?: string[]; data?: string; logIndex?: number | string }[] }
+    ).logs
     receipts.set(hash, { raw: receipt, logs: Array.isArray(logs) ? logs : [] })
   }
   return receipts

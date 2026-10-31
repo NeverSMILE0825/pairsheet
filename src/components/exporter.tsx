@@ -44,6 +44,7 @@ import {
   formatIntegerAmount,
   changeTone,
   formatPoolSize,
+  formatQuoteAmount,
   formatIncome,
   formatUsd,
   formatUsdInteger,
@@ -2702,7 +2703,19 @@ export function Exporter() {
                           </td>
                         ) : null}
                         {showTx("quoteAmount") ? (
-                          <td className="px-3 py-2 text-right font-mono text-sm">{formatGroupedAmount(trade.quoteAmount)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-sm">
+                            <span className="inline-flex items-center justify-end gap-1">
+                              {trade.makerTags.includes("bot") ? (
+                                <span
+                                  className="text-red-500"
+                                  title="MEV / bot: tx went to the pool or an unverified contract router."
+                                >
+                                  <Bot className="size-3.5" aria-label="MEV bot" />
+                                </span>
+                              ) : null}
+                              {formatQuoteAmount(trade.quoteAmount)}
+                            </span>
+                          </td>
                         ) : null}
                         {showTx("baseReserve") ? (
                           <td className="px-3 py-2 text-right font-mono text-sm" title={trade.baseReserve ?? "Pool size unavailable"}>
@@ -2711,7 +2724,7 @@ export function Exporter() {
                         ) : null}
                         {showTx("quoteReserve") ? (
                           <td className="px-3 py-2 text-right font-mono text-sm" title={trade.quoteReserve ?? "Pool size unavailable"}>
-                            {trade.quoteReserve ? formatPoolSize(trade.quoteReserve) : "—"}
+                            {trade.quoteReserve ? formatQuoteAmount(trade.quoteReserve) : "—"}
                           </td>
                         ) : null}
                         {showTx("holders") ? (
@@ -2799,10 +2812,10 @@ export function Exporter() {
                             <span className="inline-flex items-center gap-2">
                               {trade.makerTags.includes("bot") ? (
                                 <span
-                                  className="text-amber-400"
-                                  title="Bot / Smart contract: this transaction went straight to the pool or through a contract with unpublished source code."
+                                  className="text-red-500"
+                                  title="MEV / bot: this transaction went straight to the pool or through a contract with unpublished source code."
                                 >
-                                  <Bot className="size-4" aria-label="Bot or smart contract" />
+                                  <Bot className="size-4" aria-label="MEV bot" />
                                 </span>
                               ) : null}
                               {trade.makerTags.includes("team") ? (

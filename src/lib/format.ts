@@ -196,19 +196,35 @@ export function formatCompactUsd(amount: string | null): string {
   return `$${compact}`
 }
 
-// Quote-token amounts (WETH and similar) stay precise below 1,000.
+/**
+ * Quote-token amounts (WETH and similar) — DEXTools-style fixed 4 decimals
+ * (0.5 → 0.5000). Zero stays "0"; values under 0.0001 keep subscript formatting.
+ */
 export function formatQuoteAmount(amount: string): string {
   const trimmed = amount.trim()
   if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return "—"
   const value = Number(trimmed)
   if (!Number.isFinite(value)) return "—"
   const abs = Math.abs(value)
-  if (abs >= 1000) return formatCompact(trimmed)
   if (abs === 0) return "0"
+  if (abs >= 1000) return formatCompact(trimmed)
   if (abs < 0.0001) return formatTiny(value)
-  const digits = abs >= 1 ? 4 : 6
-  const text = abs.toLocaleString("en-US", { maximumFractionDigits: digits })
-  return value < 0 ? `-${text}` : text
+
+  const negative = value < 0
+  const [whole, fraction = ""] = trimmed.replace("-", "").split(".")
+  let wholeOut = BigInt(whole || "0")
+  const padded = (fraction + "00000").slice(0, 5)
+  let frac4 = BigInt(padded.slice(0, 4))
+  if ((padded[4] ?? "0") >= "5") {
+    frac4 += 1n
+    if (frac4 >= 10_000n) {
+      frac4 = 0n
+      wholeOut += 1n
+    }
+  }
+  const grouped = wholeOut.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  const shown = `${grouped}.${frac4.toString().padStart(4, "0")}`
+  return negative ? `-${shown}` : shown
 }
 
 function compactMagnitude(abs: number): string | null {
