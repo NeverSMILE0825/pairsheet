@@ -1,7 +1,8 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
 import { DateTimeField } from "@/components/datetime-field"
@@ -279,6 +280,7 @@ export function Exporter() {
   const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [income, setIncome] = useState<Income | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
   const [startAt, setStartAt] = useState<DateTimeParts | null>(null)
   const [endAt, setEndAt] = useState<DateTimeParts | null>(null)
   const [period, setPeriod] = useState<PeriodFilter | null>(null)
@@ -1780,6 +1782,15 @@ export function Exporter() {
         </p>
       ) : null}
 
+      {pool ? (
+        <BehaviourReportDialog
+          open={reportOpen}
+          onClose={() => setReportOpen(false)}
+          pool={pool}
+          trades={trades}
+        />
+      ) : null}
+
       {gasSavePrompt ? (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 sm:items-center"
@@ -1925,6 +1936,17 @@ export function Exporter() {
                 <Download />
                 Download CSV
                 {filtered.length > 0 ? ` Â· ${filtered.length.toLocaleString("en-US")}` : ""}
+              </Button>
+              <Button
+                type="button"
+                size="lg"
+                variant="outline"
+                className="h-11"
+                onClick={() => setReportOpen(true)}
+                disabled={rawTrades.length === 0}
+              >
+                <FileText />
+                Generate Report
               </Button>
             </div>
           </div>

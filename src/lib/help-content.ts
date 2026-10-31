@@ -158,6 +158,23 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: "report",
+    title: "Generate Report",
+    summary: "Plain-English buy/sell behaviour across cumulative time windows from launch.",
+    bullets: [
+      "After the tape loads, Generate Report opens a modal with counts, quote totals, USD, median clip size, largest clips, and pace for first 15m → 1h → 6h → 12h → 24h → 48h → full tape.",
+      "Windows are cumulative from the first event timestamp (same style as a written GINNAN/ETH behaviour note).",
+      "Figures round to 2 decimals. The story section summarizes how buy rush vs sell catch-up shifted over time.",
+      "Uses the full loaded tape (filters do not change the report).",
+    ],
+    examples: [
+      {
+        title: "First 15 minutes",
+        body: "A launch with 50 buys / 7 sells and ~9.92 ETH bought vs ~2.88 ETH sold reads as an early buy rush; later windows show when quote volume balances and when large sell outliers appear.",
+      },
+    ],
+  },
+  {
     id: "csv",
     title: "CSV export",
     summary: "Download every filtered row, not only the current page.",
