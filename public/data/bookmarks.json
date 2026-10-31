@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-31T13:20:50.786Z",
+  "updatedAt": "2026-10-31T13:20:58.971Z",
   "bookmarks": [
     {
       "id": "ether:0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
@@ -13,7 +13,7 @@
       "baseSymbol": "HYPEPE",
       "quoteSymbol": "ETH",
       "tradeCount": 3682,
-      "starred": false
+      "starred": true
     },
     {
       "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
