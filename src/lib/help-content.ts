@@ -160,17 +160,21 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: "report",
     title: "Generate Report",
-    summary: "Plain-English buy/sell behaviour across cumulative time windows from launch.",
+    summary: "Plain-English buy/sell behaviour: volumes, pauses, and how pace changed over time.",
     bullets: [
       "After the tape loads, Generate Report opens a modal with counts, quote totals, USD, median clip size, largest clips, and pace for first 15m → 1h → 6h → 12h → 24h → 48h → full tape.",
-      "Windows are cumulative from the first event timestamp (same style as a written GINNAN/ETH behaviour note).",
-      "Figures round to 2 decimals. The story section summarizes how buy rush vs sell catch-up shifted over time.",
-      "Uses the full loaded tape (filters do not change the report).",
+      "Pauses lists the longest quiet stretches between consecutive buys/sells — when each started (offset from launch + UTC) and how long it lasted.",
+      "How buy / sell speed changed uses non-overlapping rings (launch→15m, 15m→1h, …) with buys/h, sells/h, median waits, and whether each ring sped up or slowed vs the prior one.",
+      "Windows are cumulative from the first event timestamp. Figures round to 2 decimals. Uses the full loaded tape (filters do not change the report).",
     ],
     examples: [
       {
         title: "First 15 minutes",
         body: "A launch with 50 buys / 7 sells and ~9.92 ETH bought vs ~2.88 ETH sold reads as an early buy rush; later windows show when quote volume balances and when large sell outliers appear.",
+      },
+      {
+        title: "Pause + speed",
+        body: "If swaps go quiet for 2 hours after a buy at +1h 40m from launch, Pauses shows that gap. The 1h→6h ring then reports fewer buys/h than launch→15m (“slowed to ~0.2×”).",
       },
     ],
   },

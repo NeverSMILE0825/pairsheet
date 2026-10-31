@@ -5,6 +5,9 @@ import { FileText, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   buildBehaviourReport,
+  formatDuration,
+  formatPauseParagraph,
+  formatSpeedSegmentParagraph,
   formatWindowParagraph,
   type BehaviourReport,
 } from "@/lib/behaviour-report"
@@ -85,6 +88,39 @@ export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
                   <p className="text-foreground/90">{formatWindowParagraph(window, report.quoteSymbol)}</p>
                 </section>
               ))}
+
+              <section className="space-y-2 border-t border-border pt-4">
+                <h3 className="text-sm font-semibold text-foreground">Pauses — when and how long</h3>
+                <p className="text-foreground/90">{report.pausesStory}</p>
+                {report.pauses.length > 0 ? (
+                  <ul className="list-none space-y-2 text-foreground/90">
+                    {report.pauses.map((pause, index) => (
+                      <li key={`${pause.startIso}-${pause.endIso}`}>{formatPauseParagraph(pause, index)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Threshold for a notable pause: {formatDuration(report.pauseThresholdSec)}.
+                  </p>
+                )}
+              </section>
+
+              <section className="space-y-2 border-t border-border pt-4">
+                <h3 className="text-sm font-semibold text-foreground">How buy / sell speed changed</h3>
+                <p className="text-foreground/90">{report.paceStory}</p>
+                <div className="space-y-3">
+                  {report.speedSegments.map((seg, index) => (
+                    <div key={seg.id} className="space-y-1">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {seg.label}
+                      </h4>
+                      <p className="text-foreground/90">
+                        {formatSpeedSegmentParagraph(seg, index > 0 ? report.speedSegments[index - 1] : null)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
 
               <section className="space-y-1.5 border-t border-border pt-4">
                 <h3 className="text-sm font-semibold text-foreground">How the story shifted</h3>
