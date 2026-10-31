@@ -32,7 +32,7 @@ export function TinyAmount({ value, prefix = "", className }: TinyAmountProps) {
       {parts.sign}
       0.0
       <sub
-        className="bottom-0 mx-px text-[0.92em] font-bold leading-none text-foreground"
+        className="bottom-0 mx-px text-[0.92em] font-bold leading-none text-yellow-400"
         title={`${parts.zeros} zero${parts.zeros === 1 ? "" : "s"} after the decimal`}
       >
         {parts.zeros}

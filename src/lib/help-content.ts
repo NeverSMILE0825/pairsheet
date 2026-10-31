@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-10-30"
+export const HELP_UPDATED_AT = "2026-10-31"
 
 export type HelpExample = {
   title: string
@@ -45,7 +45,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: "One row per buy, sell, add, remove, or init — oldest is No. 1.",
     bullets: [
       "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price). Small USD differences vs DEXTools come from their ETH/USD feed, not from token amounts.",
-      "Very small prices show as 0.0₈123 — the bold subscript digit is how many zeros sit after the decimal (slightly larger than plain Unicode subscripts so it stays readable).",
+      "Very small prices show as 0.0₈123 — the yellow bold subscript digit is how many zeros sit after the decimal (slightly larger than plain Unicode subscripts so it stays readable).",
       "M. Cap is unit price × token supply when supply is known.",
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove amounts come from ERC-20 transfers to/from the PoolManager; native ETH has no Transfer so the ETH column stays 0 on one-sided adds, matching DEXTools.",
