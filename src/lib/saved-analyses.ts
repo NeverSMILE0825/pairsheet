@@ -6,6 +6,17 @@ const DB_VERSION = 1
 const META_STORE = "meta"
 const PAYLOAD_STORE = "payload"
 
+/** Bookmark / saved-pair count is unlimited. Only full tape blobs may be pruned under storage pressure. */
+export const MAX_SAVED_PAIRS = Number.POSITIVE_INFINITY
+
+export type SaveAnalysisResult = {
+  meta: SavedAnalysisMeta
+  /** False when the bookmark row was saved but the full tape could not fit in IndexedDB. */
+  storedPayload: boolean
+  /** Full tapes removed to free space for the new save (bookmark rows are kept). */
+  prunedPayloadIds: string[]
+}
+
 export type SavedAnalysisMeta = {
   id: string
   url: string
@@ -101,6 +112,79 @@ export async function loadSavedAnalysis(id: string): Promise<SavedAnalysisPayloa
   }
 }
 
+export function isQuotaError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const err = error as { name?: string; code?: number }
+  return err.name === "QuotaExceededError" || err.code === 22
+}
+
+/**
+ * Prefer deleting full tapes for unstarred, oldest-first pairs.
+ * Bookmark meta rows are never selected — only payload blobs.
+ */
+export function pickPayloadsToPrune(
+  metas: SavedAnalysisMeta[],
+  preserveIds: Set<string>,
+  count: number,
+): string[] {
+  if (count <= 0) return []
+  return [...metas]
+    .filter((item) => !preserveIds.has(item.id))
+    .sort((a, b) => {
+      const star = Number(Boolean(a.starred)) - Number(Boolean(b.starred))
+      if (star !== 0) return star
+      return a.savedAt.localeCompare(b.savedAt)
+    })
+    .slice(0, count)
+    .map((item) => item.id)
+}
+
+/** Drop full tapes only (Open still lists the pair; shared/sync metas stay). */
+export async function deletePayloadOnly(id: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return
+  const db = await openDb()
+  try {
+    const tx = db.transaction(PAYLOAD_STORE, "readwrite")
+    tx.objectStore(PAYLOAD_STORE).delete(id)
+    await transactionDone(tx)
+  } finally {
+    db.close()
+  }
+}
+
+export async function pruneOldestPayloads(
+  preserveIds: Set<string>,
+  count = 1,
+): Promise<string[]> {
+  const metas = await listSavedAnalyses()
+  const victims = pickPayloadsToPrune(metas, preserveIds, count)
+  for (const id of victims) await deletePayloadOnly(id)
+  return victims
+}
+
+async function putMetaAndPayload(meta: SavedAnalysisMeta, payload: SavedAnalysisPayload): Promise<void> {
+  const db = await openDb()
+  try {
+    const writeTx = db.transaction([META_STORE, PAYLOAD_STORE], "readwrite")
+    writeTx.objectStore(META_STORE).put(meta)
+    writeTx.objectStore(PAYLOAD_STORE).put(payload)
+    await transactionDone(writeTx)
+  } finally {
+    db.close()
+  }
+}
+
+async function putMetaOnly(meta: SavedAnalysisMeta): Promise<void> {
+  const db = await openDb()
+  try {
+    const writeTx = db.transaction(META_STORE, "readwrite")
+    writeTx.objectStore(META_STORE).put(meta)
+    await transactionDone(writeTx)
+  } finally {
+    db.close()
+  }
+}
+
 export async function saveAnalysis(input: {
   url: string
   pool: PoolView
@@ -111,50 +195,68 @@ export async function saveAnalysis(input: {
   /** Preserve original time when importing a vault. */
   savedAt?: string
   starred?: boolean
-}): Promise<SavedAnalysisMeta> {
+}): Promise<SaveAnalysisResult> {
   if (typeof indexedDB === "undefined") {
     throw new Error("Saved analyses need a browser with IndexedDB.")
   }
   const id = analysisId(input.pool)
   const savedAt = input.savedAt && Number.isFinite(Date.parse(input.savedAt)) ? input.savedAt : new Date().toISOString()
   const db = await openDb()
+  let existing: SavedAnalysisMeta | undefined
   try {
     const readTx = db.transaction(META_STORE, "readonly")
-    const existing = await requestToPromise(
+    existing = await requestToPromise(
       readTx.objectStore(META_STORE).get(id) as IDBRequest<SavedAnalysisMeta | undefined>,
     )
     await transactionDone(readTx)
-    const meta: SavedAnalysisMeta = {
-      id,
-      url: input.url,
-      savedAt,
-      chainId: input.pool.chainId,
-      chainName: input.pool.chainName,
-      address: input.pool.address,
-      dex: input.pool.dex,
-      baseSymbol: input.pool.baseSymbol,
-      quoteSymbol: input.pool.quoteSymbol,
-      tradeCount: input.trades.length,
-      starred: input.starred !== undefined ? Boolean(input.starred) : Boolean(existing?.starred),
-    }
-    const payload: SavedAnalysisPayload = {
-      id,
-      url: input.url,
-      savedAt,
-      pool: input.pool,
-      trades: input.trades,
-      facts: input.facts,
-      warning: input.warning,
-      capped: input.capped,
-    }
-    const writeTx = db.transaction([META_STORE, PAYLOAD_STORE], "readwrite")
-    writeTx.objectStore(META_STORE).put(meta)
-    writeTx.objectStore(PAYLOAD_STORE).put(payload)
-    await transactionDone(writeTx)
-    return meta
   } finally {
     db.close()
   }
+  const meta: SavedAnalysisMeta = {
+    id,
+    url: input.url,
+    savedAt,
+    chainId: input.pool.chainId,
+    chainName: input.pool.chainName,
+    address: input.pool.address,
+    dex: input.pool.dex,
+    baseSymbol: input.pool.baseSymbol,
+    quoteSymbol: input.pool.quoteSymbol,
+    tradeCount: input.trades.length,
+    starred: input.starred !== undefined ? Boolean(input.starred) : Boolean(existing?.starred),
+  }
+  const payload: SavedAnalysisPayload = {
+    id,
+    url: input.url,
+    savedAt,
+    pool: input.pool,
+    trades: input.trades,
+    facts: input.facts,
+    warning: input.warning,
+    capped: input.capped,
+  }
+
+  // Bookmark row first — shared list / Open dialog must not depend on tape fitting.
+  await putMetaOnly(meta)
+
+  const prunedPayloadIds: string[] = []
+  const preserve = new Set<string>([id])
+  let batch = 1
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      await putMetaAndPayload(meta, payload)
+      return { meta, storedPayload: true, prunedPayloadIds }
+    } catch (error) {
+      if (!isQuotaError(error)) throw error
+      const removed = await pruneOldestPayloads(preserve, batch)
+      prunedPayloadIds.push(...removed)
+      if (removed.length === 0) break
+      batch = Math.min(8, batch * 2)
+    }
+  }
+
+  // Meta stays; Open will reload from chain for this pair on browsers without a tape.
+  return { meta, storedPayload: false, prunedPayloadIds }
 }
 
 export async function setAnalysisStarred(id: string, starred: boolean): Promise<void> {
@@ -233,7 +335,7 @@ export async function importSavedVault(vault: SavedVault): Promise<number> {
   for (const payload of vault.payloads) {
     if (!payload?.id || !payload.pool || !Array.isArray(payload.trades)) continue
     const metaFromVault = vault.bookmarks.find((row) => row.id === payload.id)
-    await saveAnalysis({
+    const result = await saveAnalysis({
       url: payload.url,
       pool: payload.pool,
       trades: payload.trades,
@@ -243,7 +345,7 @@ export async function importSavedVault(vault: SavedVault): Promise<number> {
       savedAt: payload.savedAt || metaFromVault?.savedAt,
       starred: Boolean(metaFromVault?.starred),
     })
-    imported += 1
+    if (result.meta) imported += 1
   }
   return imported
 }

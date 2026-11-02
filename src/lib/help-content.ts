@@ -140,7 +140,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: "Save, Open, Export, sync",
     summary: "Keep full snapshots on this browser; share the pair list across PCs via GitHub.",
     bullets: [
-      "Save analysis stores the full tape (trades, facts, holders) in this browser’s IndexedDB.",
+      "Save analysis stores the full tape (trades, facts, holders) in this browser’s IndexedDB. There is no 10-pair (or any) count limit on bookmarks or the shared list.",
+      "If this browser runs out of storage, Pair Sheet drops older full tapes first (starred last) but keeps every bookmark row. Open still lists them; missing tapes reload from chain.",
       "Open lists local snapshots plus the shared GitHub bookmark list. Shared rows reload from chain if this PC has no snapshot.",
       "Export / Import a JSON vault to move full snapshots between browsers without GitHub.",
       "Enable sync with a fine-grained GitHub PAT (Contents: Read and Write on NeverSMILE0825/pairsheet). Publish now writes public/data/bookmarks.json.",

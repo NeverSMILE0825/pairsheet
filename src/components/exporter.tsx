@@ -1134,7 +1134,7 @@ export function Exporter() {
     setSaveBusy(true)
     setSaveNotice(null)
     try {
-      const meta = await saveAnalysis({
+      const { meta, storedPayload, prunedPayloadIds } = await saveAnalysis({
         url: url.trim() || pool.dextoolsUrl,
         pool,
         trades: rawTrades,
@@ -1145,18 +1145,25 @@ export function Exporter() {
       cacheBookmarkMetas([meta])
       const local = await listSavedAnalyses()
       setLocalSavedIds(new Set(local.map((item) => item.id)))
+      const pruneNote =
+        prunedPayloadIds.length > 0
+          ? ` Freed space by dropping ${prunedPayloadIds.length.toLocaleString("en-US")} older full tape(s) (bookmarks kept).`
+          : ""
+      const tapeNote = storedPayload
+        ? ""
+        : " Bookmark saved; this browser could not keep the full tape (storage full) — Open will reload from chain."
       if (hasSyncToken()) {
         const catalog = await publishMergedBookmarks(local)
         setSyncStatus(getSyncStatus())
         flashNotice(
-          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced ${catalog.bookmarks.length} pair(s) to every browser.`,
+          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} and synced ${catalog.bookmarks.length.toLocaleString("en-US")} pair(s) to every browser.${pruneNote}${tapeNote}`,
           "ok",
         )
       } else {
         await refreshSavedList()
         setSyncStatus(getSyncStatus())
         flashNotice(
-          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser. Open â†’ Enable sync (or Export) to use it on Edge / other PCs.`,
+          `Saved ${pool.baseSymbol} / ${pool.quoteSymbol} on this browser.${pruneNote}${tapeNote} Open → Enable sync (or Export) to use it on Edge / other PCs.`,
           "ok",
         )
       }
