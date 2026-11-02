@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-02T16:17:53.777Z",
+  "updatedAt": "2026-11-02T16:18:12.306Z",
   "bookmarks": [
     {
       "id": "ether:0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
@@ -68,6 +68,19 @@
       "starred": true
     },
     {
+      "id": "ether:0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
+      "savedAt": "2026-10-30T01:13:41.692Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0xcd3ecd346920d9a069fdf35cc0b6c9e0205c08d9",
+      "dex": "Uniswap V3",
+      "baseSymbol": "BITPEPE",
+      "quoteSymbol": "WETH",
+      "tradeCount": 893,
+      "starred": false
+    },
+    {
       "id": "ether:0x6109c6323f02616c71cfe5f3657d978a0bfc033a",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x6109c6323f02616c71cfe5f3657d978a0bfc033a",
       "savedAt": "2026-10-29T17:46:33.007Z",
@@ -91,19 +104,6 @@
       "baseSymbol": "FWOG",
       "quoteSymbol": "WETH",
       "tradeCount": 67,
-      "starred": false
-    },
-    {
-      "id": "ether:0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
-      "savedAt": "2026-10-29T16:41:53.185Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
-      "dex": "Uniswap V2",
-      "baseSymbol": "FRONGUS",
-      "quoteSymbol": "WETH",
-      "tradeCount": 670,
       "starred": false
     },
     {
