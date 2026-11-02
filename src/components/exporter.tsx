@@ -301,6 +301,9 @@ export function Exporter() {
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [showMevOnly, setShowMevOnly] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<SavedAnalysisMeta | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteResult, setDeleteResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
   const [syncEnabled, setSyncEnabled] = useState(false)
@@ -1248,11 +1251,25 @@ export function Exporter() {
     }
   }
 
-  async function removeSaved(id: string) {
-    const meta = savedList.find((item) => item.id === id)
-    const label = meta ? `${meta.baseSymbol} / ${meta.quoteSymbol}` : "saved pair"
+  function askDeleteSaved(item: SavedAnalysisMeta) {
+    setDeleteResult(null)
+    setDeleteTarget(item)
+  }
+
+  function closeDeleteModal() {
+    if (deleteBusy) return
+    setDeleteTarget(null)
+    setDeleteResult(null)
+  }
+
+  async function confirmDeleteSaved() {
+    if (!deleteTarget || deleteBusy) return
+    const id = deleteTarget.id
+    const label = `${deleteTarget.baseSymbol} / ${deleteTarget.quoteSymbol}`
+    const wasLocal = localSavedIds.has(id)
+    setDeleteBusy(true)
+    setDeleteResult(null)
     try {
-      const wasLocal = localSavedIds.has(id)
       await deleteSavedAnalysis(id)
       const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
       setLocalSavedIds(new Set(local.map((item) => item.id)))
@@ -1263,33 +1280,36 @@ export function Exporter() {
           await publishBookmarks(merged, undefined, { allowEmpty: true })
           setSavedList(merged)
           setSyncStatus(getSyncStatus())
-          flashNotice(`Deleted ${label} from this browser and the shared list.`, "ok")
-          return
+          const message = `${label} was deleted from this browser and the shared list.`
+          setDeleteResult({ ok: true, message })
+          flashNotice(message, "ok")
         } catch (syncError) {
           await refreshSavedList()
-          flashNotice(
-            `Deleted ${label} on this browser, but shared-list sync failed: ${
-              syncError instanceof Error ? syncError.message : "unknown error"
-            }`,
-            "error",
-          )
-          return
+          const message = `${label} was deleted on this browser, but the shared list could not be updated: ${
+            syncError instanceof Error ? syncError.message : "unknown error"
+          }`
+          setDeleteResult({ ok: false, message })
+          flashNotice(message, "error")
         }
-      }
-      await refreshSavedList()
-      if (!wasLocal) {
-        flashNotice(
-          `${label} is only on the shared list. Enable sync to remove it for every browser.`,
-          "info",
-        )
+      } else if (!wasLocal) {
+        setSavedList((current) => current.filter((item) => item.id !== id))
+        const message = `${label} is only on the shared list. Enable sync (GitHub token) to delete it for every browser.`
+        setDeleteResult({ ok: false, message })
+        flashNotice(message, "error")
+        await refreshSavedList()
       } else {
-        flashNotice(`Deleted ${label} from this browser.`, "ok")
+        setSavedList((current) => current.filter((item) => item.id !== id))
+        const message = `${label} was deleted successfully from this browser.`
+        setDeleteResult({ ok: true, message })
+        flashNotice(message, "ok")
+        await refreshSavedList()
       }
     } catch (error) {
-      flashNotice(
-        `Could not delete ${label}: ${error instanceof Error ? error.message : "unknown error"}`,
-        "error",
-      )
+      const message = `Could not delete ${label}: ${error instanceof Error ? error.message : "unknown error"}`
+      setDeleteResult({ ok: false, message })
+      flashNotice(message, "error")
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -1778,9 +1798,10 @@ export function Exporter() {
                             type="button"
                             size="sm"
                             variant="ghost"
+                            className="text-rose-300 hover:text-rose-200"
                             aria-label={`Delete saved ${item.baseSymbol} / ${item.quoteSymbol}`}
-                            disabled={phase === "loading"}
-                            onClick={() => void removeSaved(item.id)}
+                            disabled={phase === "loading" || deleteBusy}
+                            onClick={() => askDeleteSaved(item)}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -1817,6 +1838,67 @@ export function Exporter() {
           pool={pool}
           trades={trades}
         />
+      ) : null}
+
+      {deleteTarget ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 p-4 sm:items-center"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDeleteModal()
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-pair-title"
+            className="w-full max-w-md rounded-2xl bg-card p-5 shadow-xl ring-1 ring-foreground/10"
+          >
+            <h2 id="delete-pair-title" className="text-base font-semibold tracking-tight">
+              Delete saved pair?
+            </h2>
+            {!deleteResult ? (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Remove <span className="font-medium text-foreground">{deleteTarget.baseSymbol} / {deleteTarget.quoteSymbol}</span>
+                  {hasSyncToken()
+                    ? " from this browser and the shared bookmark list? This cannot be undone."
+                    : localSavedIds.has(deleteTarget.id)
+                      ? " from this browser? Enable sync to also remove it from the shared list."
+                      : " — this row is only on the shared list. Enable sync to delete it for every browser."}
+                </p>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="ghost" disabled={deleteBusy} onClick={closeDeleteModal}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={deleteBusy || (!localSavedIds.has(deleteTarget.id) && !hasSyncToken())}
+                    onClick={() => void confirmDeleteSaved()}
+                  >
+                    {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                    {deleteBusy ? "Deleting…" : "Delete pair"}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p
+                  className={`mt-2 text-sm ${deleteResult.ok ? "text-emerald-300" : "text-rose-300"}`}
+                  role="alert"
+                >
+                  {deleteResult.message}
+                </p>
+                <div className="mt-4 flex justify-end">
+                  <Button type="button" onClick={closeDeleteModal}>
+                    OK
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       ) : null}
 
       {gasSavePrompt ? (
