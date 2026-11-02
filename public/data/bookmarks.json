@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-02T16:16:09.674Z",
+  "updatedAt": "2026-11-02T16:16:52.603Z",
   "bookmarks": [
     {
       "id": "ether:0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
-      "savedAt": "2026-11-02T16:15:14.788Z",
+      "savedAt": "2026-11-02T16:16:48.436Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
@@ -104,6 +104,19 @@
       "baseSymbol": "FWOG",
       "quoteSymbol": "WETH",
       "tradeCount": 67,
+      "starred": false
+    },
+    {
+      "id": "ether:0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
+      "savedAt": "2026-10-29T16:41:53.185Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x159f026b2525dbfcab3a31ae1f2830a1137d2217",
+      "dex": "Uniswap V2",
+      "baseSymbol": "FRONGUS",
+      "quoteSymbol": "WETH",
+      "tradeCount": 670,
       "starred": false
     },
     {
