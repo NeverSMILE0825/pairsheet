@@ -1,5 +1,6 @@
 import type { ChainConfig } from "./chains"
 import { decodeAbiString, sameAddress } from "./decode"
+import { formatUnits } from "./format"
 import { AppError, fetchJson, rpcCall } from "./http"
 import { isStableSymbol } from "./prices"
 import type { PoolContext, PoolStyle, TokenInfo } from "./types"
@@ -255,9 +256,15 @@ async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool
     if (!base?.attributes || !quote?.attributes) return null
     const attributes = body.data?.attributes ?? {}
     const baseToken = tokenFromGecko(base.attributes)
-    const supplyFromPool = supplyFromFdv(attributes)
-    const baseTotalSupply =
-      supplyFromPool ?? (await loadTokenSupply(chain, baseToken.address).catch(() => null))
+    // Prefer real token supply. Pool fdv_usd ÷ price is often wrong on Gecko (esp. V4),
+    // e.g. GROKLET ~25× inflated → chart Max ~$12M instead of ~$508K.
+    const fromIncluded = supplyFromNormalizedTotal(base.attributes)
+    const fromTokenApi =
+      fromIncluded ?? (await loadGeckoTokenSupply(chain, baseToken.address).catch(() => null))
+    const fromChain =
+      fromTokenApi ??
+      (await loadOnChainTotalSupply(chain, baseToken.address, baseToken.decimals).catch(() => null))
+    const baseTotalSupply = pickBaseTotalSupply(fromChain, supplyFromFdv(attributes))
     return {
       base: baseToken,
       quote: tokenFromGecko(quote.attributes),
@@ -274,7 +281,18 @@ async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool
   }
 }
 
-/** Prefer FDV ÷ price from the pool payload (no extra round-trip). */
+/** Token `normalized_total_supply` from a Gecko token (or included base_token) payload. */
+export function supplyFromNormalizedTotal(attributes: Record<string, unknown>): string | null {
+  if (attributes.normalized_total_supply == null) return null
+  const value = Number(attributes.normalized_total_supply)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return String(value)
+}
+
+/**
+ * Pool fdv_usd ÷ base_token_price_usd — last-resort supply estimate only.
+ * Gecko’s pool FDV is frequently inconsistent with token FDV / total supply.
+ */
 export function supplyFromFdv(attributes: Record<string, unknown>): string | null {
   const price = Number(attributes.base_token_price_usd)
   const fdv = Number(attributes.fdv_usd)
@@ -284,18 +302,40 @@ export function supplyFromFdv(attributes: Record<string, unknown>): string | nul
   return String(supply)
 }
 
-async function loadTokenSupply(chain: ChainConfig, tokenAddress: string): Promise<string | null> {
+/** Prefer on-chain / normalized token supply; use FDV-derived only when that is missing. */
+export function pickBaseTotalSupply(
+  tokenSupply: string | null,
+  fdvSupply: string | null,
+): string | null {
+  return tokenSupply ?? fdvSupply
+}
+
+export async function loadGeckoTokenSupply(
+  chain: ChainConfig,
+  tokenAddress: string,
+): Promise<string | null> {
   if (!tokenAddress || isNativeToken(tokenAddress)) return null
   const url = `https://api.geckoterminal.com/api/v2/networks/${chain.gecko}/tokens/${tokenAddress}`
   const body = (await fetchJson(url, { headers: { accept: "application/json;version=20230302" } })) as {
     data?: { attributes?: Record<string, unknown> }
   }
-  const attributes = body.data?.attributes ?? {}
-  if (attributes.normalized_total_supply != null) {
-    const value = Number(attributes.normalized_total_supply)
-    if (Number.isFinite(value) && value > 0) return String(value)
-  }
-  return null
+  return supplyFromNormalizedTotal(body.data?.attributes ?? {})
+}
+
+async function loadOnChainTotalSupply(
+  chain: ChainConfig,
+  tokenAddress: string,
+  decimals: number,
+): Promise<string | null> {
+  if (!tokenAddress || isNativeToken(tokenAddress) || !chain.rpcs.length) return null
+  const raw = await rpcCall(chain.rpcs, "eth_call", [
+    { to: tokenAddress, data: "0x18160ddd" },
+    "latest",
+  ])
+  if (typeof raw !== "string" || !raw.startsWith("0x")) return null
+  const amount = BigInt(raw)
+  if (amount <= 0n) return null
+  return formatUnits(amount, decimals)
 }
 
 function tokenFromGecko(attributes: Record<string, unknown>): TokenInfo {

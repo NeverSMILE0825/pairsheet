@@ -1,7 +1,12 @@
 import { encodeBase64Url } from "./bytes"
 import type { ChainConfig } from "./chains"
 import { formatUnits, marketCapFromPrice, priceInQuote, priceUsdFromTotal, totalUsd } from "./format"
-import { supplyFromFdv } from "./pool"
+import {
+  loadGeckoTokenSupply,
+  pickBaseTotalSupply,
+  supplyFromFdv,
+  supplyFromNormalizedTotal,
+} from "./pool"
 import { AppError, fetchJson, mapPool, sleep } from "./http"
 import { quotePricesAt } from "./prices"
 import type { PoolContext, ServerCursor, SwapsResponse, Trade } from "./types"
@@ -172,6 +177,9 @@ async function resolveSolanaPool(chain: ChainConfig, address: string, dextoolsUr
   const attributes = body.data?.attributes ?? {}
   const base = tokenFromGecko(baseRow.attributes)
   const quote = tokenFromGecko(quoteRow.attributes)
+  const fromIncluded = supplyFromNormalizedTotal(baseRow.attributes)
+  const fromTokenApi =
+    fromIncluded ?? (await loadGeckoTokenSupply(chain, base.address).catch(() => null))
   return {
     chainId: chain.id,
     chainName: chain.name,
@@ -188,7 +196,7 @@ async function resolveSolanaPool(chain: ChainConfig, address: string, dextoolsUr
     createdAt: typeof attributes.pool_created_at === "string" ? attributes.pool_created_at : null,
     priceUsd: attributes.base_token_price_usd != null ? String(attributes.base_token_price_usd) : null,
     reserveUsd: attributes.reserve_in_usd != null ? String(attributes.reserve_in_usd) : null,
-    baseTotalSupply: supplyFromFdv(attributes),
+    baseTotalSupply: pickBaseTotalSupply(fromTokenApi, supplyFromFdv(attributes)),
     dextoolsUrl,
     explorerTx: `${chain.explorer}/tx`,
     explorerAddress: `${chain.explorer}/account`,

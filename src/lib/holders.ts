@@ -84,7 +84,12 @@ async function resolveEvmHolders(
   // Routescan/Etherscan getLogs often returns an incomplete set when toBlock is a
   // concrete number; always read through "latest" and slice by each trade's index.
   const { events, truncated } = await loadEvmTransfers(chain, token, null)
-  const timeline = replayEvmTransfers(events, holderExcludeSet(poolAddress))
+  // V2/V3: exclude the pair contract. V4: pool.address is a bytes32 id (never a
+  // Transfer party) — exclude PoolManager, which actually holds the ERC-20 balances.
+  const timeline = replayEvmTransfers(
+    events,
+    holderExcludeSet(poolAddress, chain.v4PoolManager),
+  )
   const counts = new Map<string, number>()
   for (const trade of trades) {
     counts.set(trade.id, holdersAt(timeline, trade.blockNumber, trade.logIndex))

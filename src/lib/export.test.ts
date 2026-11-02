@@ -44,6 +44,7 @@ import {
 import { EMPTY_FACTS, annotateTrades, assignTxNumbers, frontRunningById, routersToCheck, sandwichBotTradeIds } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
 import { holderExcludeSet, holdersAt, replayEvmTransfers } from "./holders"
+import { pickBaseTotalSupply, supplyFromFdv, supplyFromNormalizedTotal } from "./pool"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -545,6 +546,36 @@ test("holder replay excludes the pool and burn sinks", () => {
   assert.equal(holdersAt(timeline, 1, 1), 0)
   assert.equal(holdersAt(timeline, 2, 1), 1)
   assert.equal(holdersAt(timeline, 3, 1), 0)
+})
+
+test("holder replay excludes Uniswap V4 PoolManager (not the pool id)", () => {
+  const poolId = `0x${"ab".repeat(32)}`
+  const manager = "0x000000000004444c5dc75cb358380d2e3de08a90"
+  const wallet = "0x1111111111111111111111111111111111111111"
+  const timeline = replayEvmTransfers(
+    [
+      { blockNumber: 1, logIndex: 1, from: "0x0000000000000000000000000000000000000000", to: manager, amount: 1000n },
+      { blockNumber: 2, logIndex: 1, from: manager, to: wallet, amount: 50n },
+    ],
+    holderExcludeSet(poolId, manager),
+  )
+  assert.equal(holdersAt(timeline, 1, 1), 0)
+  assert.equal(holdersAt(timeline, 2, 1), 1)
+})
+
+test("base total supply prefers normalized token supply over pool FDV÷price", () => {
+  const poolAttrs = {
+    base_token_price_usd: "0.0000128915647180475",
+    fdv_usd: "323028.972",
+  }
+  const tokenAttrs = { normalized_total_supply: "1000000000.0" }
+  const inflated = supplyFromFdv(poolAttrs)
+  assert.ok(inflated)
+  assert.ok(Number(inflated) > 20_000_000_000)
+  assert.equal(supplyFromNormalizedTotal(tokenAttrs), "1000000000")
+  assert.equal(pickBaseTotalSupply("1000000000", inflated), "1000000000")
+  assert.equal(pickBaseTotalSupply(null, inflated), inflated)
+  assert.equal(marketCapFromPrice("0.00050824", "1000000000"), "508240")
 })
 
 test("detects the Solana wallet that funded a maker with SOL", () => {

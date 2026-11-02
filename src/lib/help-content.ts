@@ -51,13 +51,13 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price). Small USD differences vs DEXTools come from their ETH/USD feed, not from token amounts.",
       "Very small prices show as 0.0₈123 — the yellow bold subscript digit is how many zeros sit after the decimal (slightly larger than plain Unicode subscripts so it stays readable).",
-      "M. Cap is unit price × token supply when supply is known.",
+      "M. Cap is unit price × the base token’s total supply (Gecko normalized_total_supply / on-chain totalSupply). Pool FDV ÷ price is only a last-resort fallback — Gecko’s pool FDV is often wrong on Uniswap V4 and would inflate Max/Min (e.g. GROKLET Max ~$12M instead of ~$508K).",
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove token amounts use liquidity math (ticks + sqrtPrice) so a one-sided add shows 0 quote — matching DEXTools — instead of counting bundled swap transfers in the same tx.",
       "Quote column (WETH/ETH) always shows 4 decimals (0.5 → 0.5000); zero stays 0. Pool quote uses the same formatting.",
       "MEV / bot: Detect MEV bots (left of Columns) filters to DEXTools-style front-running. A red robot sits after the quote (ETH/WETH) amount when the same maker buys and sells in the same second — or with the same token amount within 30 seconds. Tooltip shows drained ETH (|buy quote − sell quote|). Ordinary round-trips minutes apart are not marked.",
       "Pool columns are actual token balances after that event (V2 Sync, V3 balances, V4 running ADD/BUY/SELL ledger). V4 never shows virtual L/√P reserves — those looked like ~1 ETH on GINNAN even when no ETH was added.",
-      "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
+      "Holders = unique wallets with a non-zero base-token balance right after that row (pair contract, Uniswap V4 PoolManager, and burn addresses excluded). Only filled when “Look up Holders” is checked. Counts jump between consecutive swaps when many wallets are drained or transferred in the blocks between those rows — that is on-chain state, not a chart bug.",
       "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
@@ -83,7 +83,15 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         title: "Holders after a buy",
-        body: "A new wallet buys the base token from the pool → Holders increases by 1. The pool itself is not counted as a holder.",
+        body: "A new wallet buys the base token from the pool → Holders increases by 1. The pair / V4 PoolManager is not counted as a holder.",
+      },
+      {
+        title: "Holders cliff between two swaps",
+        body: "GROKLET No. 2613 → 2614: Holders can fall from ~400 to ~5 in one row because ERC-20 Transfers between those blocks wiped most wallets. DEXTools’ end state (~4 holders) matches the late rows; Pair Sheet only samples holder count at swap times.",
+      },
+      {
+        title: "M. Cap vs DEXTools",
+        body: "GROKLET price × 1B supply → Max M. Cap ≈ $508K. Using Gecko pool FDV÷price (~25B “supply”) wrongly pushed Max near $12.58M; Pair Sheet prefers the token’s real total supply.",
       },
       {
         title: "MEV front-running (DEXTools-style)",
