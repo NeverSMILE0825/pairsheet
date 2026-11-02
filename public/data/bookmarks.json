@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-02T23:18:49.175Z",
+  "updatedAt": "2026-11-02T23:18:58.972Z",
   "bookmarks": [
     {
       "id": "ether:0xab7041f65bafce4866d71ac740db291820931069a92c50209174d0d37bdf3fa4",
@@ -13,7 +13,7 @@
       "baseSymbol": "GROKLET",
       "quoteSymbol": "ETH",
       "tradeCount": 2615,
-      "starred": false
+      "starred": true
     },
     {
       "id": "ether:0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
