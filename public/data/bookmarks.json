@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-02T16:14:51.958Z",
+  "updatedAt": "2026-11-02T16:15:18.576Z",
   "bookmarks": [
     {
       "id": "ether:0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
-      "savedAt": "2026-11-02T16:14:46.166Z",
+      "savedAt": "2026-11-02T16:15:14.788Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0xfedc028df370a60e6df32a73d5f692dd2413b0fdf2d19c0a406202e10bc4ab4d",
