@@ -36,7 +36,7 @@ import { AppError } from "@/lib/http"
 import { isPoolId } from "@/lib/pool"
 import { finalizeV4Tape } from "@/lib/v4-tape"
 import { lookUpWallets } from "@/lib/wallets"
-import { EMPTY_FACTS, annotateTrades, routersToCheck, type WalletFacts } from "@/lib/annotate"
+import { EMPTY_FACTS, annotateTrades, makersToCheck, routersToCheck, type WalletFacts } from "@/lib/annotate"
 import { csvFilename, tradesToCsv } from "@/lib/csv"
 import {
   compareDecimal,
@@ -132,6 +132,7 @@ const LOOKUP_HOLDERS_KEY = "pairsheet.lookupHolders"
 const PAGE_SIZES = [25, 50, 100, 250]
 const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
+const WALLET_MAKER_LIMIT = 80
 
 type Phase = "idle" | "loading" | "done" | "error"
 type ExtraLookup = "gas" | "holders" | "funders"
@@ -296,6 +297,8 @@ export function Exporter() {
   const [saveNoticeTone, setSaveNoticeTone] = useState<"ok" | "error" | "info">("info")
   const [gasSavePrompt, setGasSavePrompt] = useState(false)
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
+  const [showMevOnly, setShowMevOnly] = useState(false)
+  const [mevBusy, setMevBusy] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
@@ -473,7 +476,9 @@ export function Exporter() {
     const chain = getChain(chainId)
     if (!chain || chain.id === "solana") return
     const routers = routersToCheck(loaded, view.address, WALLET_ROUTER_LIMIT)
-    const batches = chunk(routers, WALLET_BATCH)
+    const makers = makersToCheck(loaded, WALLET_MAKER_LIMIT)
+    const addresses = [...new Set([...routers, ...makers])]
+    const batches = chunk(addresses, WALLET_BATCH)
     if (batches.length === 0) batches.push([])
     let next = 0
     const worker = async () => {
@@ -496,6 +501,19 @@ export function Exporter() {
       }
     }
     await Promise.all(Array.from({ length: 2 }, worker))
+  }
+
+  async function detectMevBots() {
+    if (!pool || rawTrades.length === 0 || phase === "loading") return
+    const token = run.current
+    setMevBusy(true)
+    setShowMevOnly(true)
+    setPage(0)
+    try {
+      await lookUpWalletFacts(pool.chainId, pool, rawTrades, token)
+    } finally {
+      if (run.current === token) setMevBusy(false)
+    }
   }
 
   async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []) {
@@ -607,6 +625,8 @@ export function Exporter() {
     setSelected(new Set())
     selectionAnchor.current = null
     setShowSelectedOnly(false)
+    setShowMevOnly(false)
+    setMevBusy(false)
     setIncome(null)
     setFunding(null)
     setHoldersBusy(false)
@@ -737,9 +757,14 @@ export function Exporter() {
     }
   }
 
+  const poolManager = pool ? getChain(pool.chainId)?.v4PoolManager ?? null : null
   const trades = useMemo(
-    () => annotateTrades(rawTrades, pool?.address ?? "", facts),
-    [rawTrades, pool?.address, facts],
+    () => annotateTrades(rawTrades, pool?.address ?? "", facts, { poolManager }),
+    [rawTrades, pool?.address, facts, poolManager],
+  )
+  const mevCount = useMemo(
+    () => trades.filter((trade) => trade.makerTags.includes("bot")).length,
+    [trades],
   )
   const makerSummaries = useMemo(() => summarizeMakers(trades), [trades])
   const quotePrice = useMemo(() => latestQuotePrice(trades), [trades])
@@ -778,6 +803,7 @@ export function Exporter() {
     const needle = query.trim().toLowerCase()
     const rows = trades.filter((trade) => {
       if (showSelectedOnly && !selected.has(trade.id)) return false
+      if (showMevOnly && !trade.makerTags.includes("bot")) return false
       if (filter !== "ALL" && trade.type !== filter) return false
       if (funder === "__none__" && trade.fundedByAddress) return false
       if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
@@ -811,7 +837,7 @@ export function Exporter() {
       if (missingA !== missingB) return missingA ? 1 : -1
       return compareTrades(a, b, sortKey) * direction
     })
-  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period, showSelectedOnly])
+  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period, showSelectedOnly, showMevOnly])
 
   /** Minute tape ignores type filter so Buy/Sell columns both stay meaningful. */
   const minuteSource = useMemo(() => {
@@ -2147,6 +2173,29 @@ export function Exporter() {
                   className="h-9 sm:max-w-xs"
                   spellCheck={false}
                 />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={showMevOnly ? "default" : "outline"}
+                  className="h-9 gap-1.5"
+                  disabled={rawTrades.length === 0 || phase === "loading" || mevBusy}
+                  onClick={() => {
+                    if (showMevOnly && !mevBusy) {
+                      setShowMevOnly(false)
+                      setPage(0)
+                      return
+                    }
+                    void detectMevBots()
+                  }}
+                  title="Look up routers/makers and show same-block sandwich / unverified-contract / direct-pool MEV bots"
+                >
+                  {mevBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Bot className="size-3.5 text-red-500" />}
+                  {mevBusy
+                    ? "Detecting MEV…"
+                    : showMevOnly
+                      ? `MEV bots · ${mevCount.toLocaleString("en-US")}`
+                      : "Detect MEV bots"}
+                </Button>
               </>
             ) : null}
             {tableView === "transactions" ? (
@@ -2705,15 +2754,15 @@ export function Exporter() {
                         {showTx("quoteAmount") ? (
                           <td className="px-3 py-2 text-right font-mono text-sm">
                             <span className="inline-flex items-center justify-end gap-1">
+                              {formatQuoteAmount(trade.quoteAmount)}
                               {trade.makerTags.includes("bot") ? (
                                 <span
                                   className="text-red-500"
-                                  title="MEV / bot: tx went to the pool or an unverified contract router."
+                                  title="MEV / bot: direct PoolManager/pair hit, unverified contract router or maker, or same-block sandwich buy+sell."
                                 >
                                   <Bot className="size-3.5" aria-label="MEV bot" />
                                 </span>
                               ) : null}
-                              {formatQuoteAmount(trade.quoteAmount)}
                             </span>
                           </td>
                         ) : null}
@@ -2813,7 +2862,7 @@ export function Exporter() {
                               {trade.makerTags.includes("bot") ? (
                                 <span
                                   className="text-red-500"
-                                  title="MEV / bot: this transaction went straight to the pool or through a contract with unpublished source code."
+                                  title="MEV / bot: direct PoolManager/pair hit, unverified contract router or maker, or same-block sandwich buy+sell."
                                 >
                                   <Bot className="size-4" aria-label="MEV bot" />
                                 </span>

@@ -55,7 +55,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove token amounts use liquidity math (ticks + sqrtPrice) so a one-sided add shows 0 quote — matching DEXTools — instead of counting bundled swap transfers in the same tx.",
       "Quote column (WETH/ETH) always shows 4 decimals (0.5 → 0.5000); zero stays 0. Pool quote uses the same formatting.",
-      "MEV / bot: a red robot icon appears next to the quote amount and in Others when the tx hit the pool directly or an unverified contract router (DEXTools-style).",
+      "MEV / bot: Detect MEV bots (next to Columns) looks up top routers and makers, then filters to flagged rows. A red robot sits after the quote (ETH/WETH) amount when the tx hit the pair/PoolManager directly, used an unverified contract router or maker, or did a same-block buy+sell sandwich.",
       "Pool columns are actual token balances after that event (V2 Sync, V3 balances, V4 running ADD/BUY/SELL ledger). V4 never shows virtual L/√P reserves — those looked like ~1 ETH on GINNAN even when no ETH was added.",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
       "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",

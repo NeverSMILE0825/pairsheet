@@ -41,7 +41,7 @@ import {
   zonedPartsEndMs,
   zonedPartsToUtc,
 } from "./timezone"
-import { annotateTrades, assignTxNumbers, routersToCheck } from "./annotate"
+import { EMPTY_FACTS, annotateTrades, assignTxNumbers, routersToCheck, sandwichBotTradeIds } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
 import { holderExcludeSet, holdersAt, replayEvmTransfers } from "./holders"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
@@ -635,6 +635,69 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   assert.deepEqual(out.map((trade) => trade.makerTags), [["team"], [], ["bot"], ["team"]])
   assert.deepEqual(out.map((trade) => trade.txNo), [1, 2, 3, 4])
   assert.deepEqual(routersToCheck(trades, pool.address, 1), [router])
+})
+
+test("tags direct PoolManager hits and same-block sandwiches as bots", () => {
+  const manager = "0x000000000004444c5dc75cb358380d2e3de08a90"
+  const victim = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  const attacker = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const base = {
+    timestamp: "2024-08-04T15:54:23.000Z",
+    priceUsd: null,
+    marketCapUsd: null,
+    totalUsd: null,
+    priceQuote: null,
+    baseAmount: "1",
+    quoteAmount: "1",
+    baseReserve: null,
+    quoteReserve: null,
+    holders: null,
+    fundedBy: null,
+    fundedByAddress: null,
+    gasPriceGwei: null,
+    gasFeeWei: null,
+    gasFeeTotalEth: null,
+    makerTxCount: 0,
+    makerTags: [] as Trade["makerTags"],
+    txNo: 0,
+  }
+  const trades: Trade[] = [
+    {
+      ...base,
+      id: "front",
+      type: "BUY",
+      maker: attacker,
+      router: manager,
+      blockNumber: 50,
+      logIndex: 1,
+      txHash: "0x1",
+    },
+    {
+      ...base,
+      id: "victim",
+      type: "BUY",
+      maker: victim,
+      router: "0x4444444444444444444444444444444444444444",
+      blockNumber: 50,
+      logIndex: 2,
+      txHash: "0x2",
+    },
+    {
+      ...base,
+      id: "back",
+      type: "SELL",
+      maker: attacker,
+      router: manager,
+      blockNumber: 50,
+      logIndex: 3,
+      txHash: "0x3",
+    },
+  ]
+  assert.deepEqual([...sandwichBotTradeIds(trades)].sort(), ["back", "front"])
+  const out = annotateTrades(trades, pool.address, EMPTY_FACTS, { poolManager: manager })
+  assert.ok(out.find((trade) => trade.id === "front")?.makerTags.includes("bot"))
+  assert.ok(out.find((trade) => trade.id === "back")?.makerTags.includes("bot"))
+  assert.ok(out.find((trade) => trade.id === "victim")?.makerTags.includes("bot") === false)
 })
 
 test("numbers transactions oldest-first and keeps them when reordered", () => {
