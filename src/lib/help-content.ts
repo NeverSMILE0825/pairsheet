@@ -55,13 +55,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove token amounts use liquidity math (ticks + sqrtPrice) so a one-sided add shows 0 quote — matching DEXTools — instead of counting bundled swap transfers in the same tx.",
       "Quote column (WETH/ETH) always shows 4 decimals (0.5 → 0.5000); zero stays 0. Pool quote uses the same formatting.",
-      "MEV / bot: Detect MEV bots (next to Columns) looks up top routers and makers, then filters to flagged rows. A red robot sits after the quote (ETH/WETH) amount when the tx hit the pair/PoolManager directly, used an unverified contract router or maker, or did a same-block buy+sell sandwich.",
+      "MEV / bot: Detect MEV bots (left of Columns) filters to DEXTools-style front-running. A red robot sits after the quote (ETH/WETH) amount when the same maker buys and sells in the same second — or with the same token amount within 30 seconds. Tooltip shows drained ETH (|buy quote − sell quote|). Ordinary round-trips minutes apart are not marked.",
       "Pool columns are actual token balances after that event (V2 Sync, V3 balances, V4 running ADD/BUY/SELL ledger). V4 never shows virtual L/√P reserves — those looked like ~1 ETH on GINNAN even when no ETH was added.",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pool + burn addresses excluded). Only filled when “Look up Holders” is checked.",
       "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
-      "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Bot / Team icons mark contract routers and deployer / first-LP wallets.",
+      "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
       "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
     ],
     examples: [
@@ -84,6 +84,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Holders after a buy",
         body: "A new wallet buys the base token from the pool → Holders increases by 1. The pool itself is not counted as a holder.",
+      },
+      {
+        title: "MEV front-running (DEXTools-style)",
+        body: "Same second: wallet 0xea2… buys 0.2786 ETH then sells 0.2803 ETH → both legs get the red robot after ETH, drained ≈ 0.0017. A buy and sell of the same token amount five minutes apart (e.g. GTA6 rows 8 and 16) is not front-running.",
       },
     ],
   },

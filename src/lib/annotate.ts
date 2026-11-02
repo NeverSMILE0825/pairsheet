@@ -15,6 +15,8 @@ export type AnnotateOptions = {
 
 export const EMPTY_FACTS: WalletFacts = { contracts: {}, deployer: null }
 
+/** DEXTools `isFrontRunning` window: opposite buy/sell with same token amount within this many seconds. */
+export const FRONT_RUNNING_WINDOW_SEC = 30
 // Routers that carry the most trades first, so a capped lookup covers the bulk of the tape.
 export function routersToCheck(trades: Trade[], poolAddress: string, limit: number): string[] {
   const pool = normalizeAddress(poolAddress)
@@ -30,7 +32,7 @@ export function routersToCheck(trades: Trade[], poolAddress: string, limit: numb
     .map(([router]) => router)
 }
 
-/** Top makers by tx count — used to detect contract/MEV wallets (not only routers). */
+/** Top makers by tx count — used when looking up contract / deployer facts. */
 export function makersToCheck(trades: Trade[], limit: number): string[] {
   const counts = new Map<string, number>()
   for (const trade of trades) {
@@ -44,64 +46,108 @@ export function makersToCheck(trades: Trade[], limit: number): string[] {
     .map(([maker]) => maker)
 }
 
+function unixSeconds(iso: string): number {
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0
+}
+
+function sameTokenAmount(left: Trade, right: Trade): boolean {
+  const a = left.baseAmount.trim()
+  const b = right.baseAmount.trim()
+  if (!a || !b) return false
+  if (a === b) return true
+  const na = Number(a)
+  const nb = Number(b)
+  return Number.isFinite(na) && Number.isFinite(nb) && na === nb
+}
+
+function quoteEth(trade: Trade): number {
+  const n = Number(trade.quoteAmount)
+  return Number.isFinite(n) ? Math.abs(n) : 0
+}
+
+type FrontRow = {
+  trade: Trade
+  maker: string
+  ts: number
+  frontRunning: number | undefined
+}
+
 /**
- * Same-block buy+sell by one maker with another trader in between → classic sandwich.
- * Also flags same-block buy+sell even without a clear victim (arb / backrun style).
+ * DEXTools pair-explorer front-running / sandwich mark
+ * (`isFrontRunning` + `fillTransactionsWithFrontRunning`).
+ * Opposite buy+sell, different id, same maker, and (same second OR same token
+ * amount within 30s). Drain = |quote ETH difference| between the two legs.
  */
-export function sandwichBotTradeIds(trades: Trade[]): Set<string> {
-  const byBlock = new Map<number, Trade[]>()
-  for (const trade of trades) {
-    if (trade.type !== "BUY" && trade.type !== "SELL") continue
-    const list = byBlock.get(trade.blockNumber)
-    if (list) list.push(trade)
-    else byBlock.set(trade.blockNumber, [trade])
+export function frontRunningById(trades: Trade[]): Map<string, number> {
+  const swaps = trades.filter((trade) => trade.type === "BUY" || trade.type === "SELL")
+
+  function isFrontRunning(existing: FrontRow, current: FrontRow): boolean {
+    if (existing.frontRunning !== undefined) return false
+    if (existing.trade.id === current.trade.id) return false
+    if (existing.trade.type === current.trade.type) return false
+    if (!(existing.maker && existing.maker === current.maker)) return false
+    const sameTs = existing.ts === current.ts
+    const sameAmount = sameTokenAmount(existing.trade, current.trade)
+    const within = Math.abs(existing.ts - current.ts) < FRONT_RUNNING_WINDOW_SEC
+    return sameTs || (sameAmount && within)
   }
 
-  const botIds = new Set<string>()
-  for (const rows of byBlock.values()) {
-    if (rows.length < 2) continue
-    const ordered = [...rows].sort((a, b) => a.logIndex - b.logIndex || a.id.localeCompare(b.id))
-    const byMaker = new Map<string, Trade[]>()
-    for (const trade of ordered) {
-      const maker = normalizeAddress(trade.maker)
-      if (!maker) continue
-      const list = byMaker.get(maker)
-      if (list) list.push(trade)
-      else byMaker.set(maker, [trade])
+  // Newest-first, matching only against already-seen (newer) legs — same as
+  // DEXTools when filling a batch against an empty "existing" list.
+  const newestFirst = [...swaps].sort(
+    (a, b) =>
+      unixSeconds(b.timestamp) - unixSeconds(a.timestamp) ||
+      b.blockNumber - a.blockNumber ||
+      b.logIndex - a.logIndex ||
+      b.id.localeCompare(a.id),
+  )
+  const processed: FrontRow[] = []
+
+  for (const trade of newestFirst) {
+    const current: FrontRow = {
+      trade,
+      maker: normalizeAddress(trade.maker),
+      ts: unixSeconds(trade.timestamp),
+      frontRunning: undefined,
     }
-    for (const [maker, mine] of byMaker) {
-      const hasBuy = mine.some((trade) => trade.type === "BUY")
-      const hasSell = mine.some((trade) => trade.type === "SELL")
-      if (!hasBuy || !hasSell) continue
-      const first = mine[0].logIndex
-      const last = mine[mine.length - 1].logIndex
-      const hasVictim = ordered.some((trade) => {
-        if (trade.logIndex <= first || trade.logIndex >= last) return false
-        return normalizeAddress(trade.maker) !== maker
-      })
-      // Same-block buy+sell is enough for a bot mark; victim between makes it definitive.
-      if (hasVictim || mine.length >= 2) {
-        for (const trade of mine) botIds.add(trade.id)
-      }
+    let matched: number | undefined
+    // DEXTools also scans ±5 neighbors of existing history; for a full local
+    // tape the accumulating newest-first list covers same-second sandwiches.
+    for (const other of processed) {
+      if (!isFrontRunning(other, current)) continue
+      const drain = Math.abs(quoteEth(current.trade) - quoteEth(other.trade))
+      other.frontRunning = drain
+      matched = drain
+      break
     }
+    current.frontRunning = matched
+    processed.push(current)
   }
-  return botIds
+
+  const out = new Map<string, number>()
+  for (const row of processed) {
+    if (row.frontRunning !== undefined) out.set(row.trade.id, row.frontRunning)
+  }
+  return out
+}
+
+/** @deprecated Prefer frontRunningById — kept for older tests / call sites. */
+export function sandwichBotTradeIds(trades: Trade[]): Set<string> {
+  return new Set(frontRunningById(trades).keys())
 }
 
 /**
  * Adds the per-wallet transaction count and the Bot / Team tags.
- * Bot when any of:
- *  - tx.to is the pair / V4 PoolManager (direct pool hit, no public router)
- *  - tx.to is an unverified contract (private MEV / sniper router)
- *  - maker is an unverified contract
- *  - same-block sandwich / buy+sell pattern (see sandwichBotTradeIds)
+ * Bot (DEXTools front-running): same-maker opposite buy+sell in the same second,
+ * or same token amount within 30s — see frontRunningById.
  * Team: token deployer or first liquidity adder.
  */
 export function annotateTrades(
   trades: Trade[],
-  poolAddress: string,
+  _poolAddress: string,
   facts: WalletFacts,
-  options: AnnotateOptions = {},
+  _options: AnnotateOptions = {},
 ): Trade[] {
   const counts = new Map<string, number>()
   let firstLiquidity: Trade | null = null
@@ -122,24 +168,12 @@ export function annotateTrades(
   if (facts.deployer) teamWallets.add(normalizeAddress(facts.deployer))
   if (firstLiquidity) teamWallets.add(normalizeAddress(firstLiquidity.maker))
 
-  const directTargets = new Set<string>()
-  if (poolAddress) directTargets.add(normalizeAddress(poolAddress))
-  if (options.poolManager) directTargets.add(normalizeAddress(options.poolManager))
-
-  const sandwichIds = sandwichBotTradeIds(trades)
+  const frontRunning = frontRunningById(trades)
 
   const tagged = trades.map((trade) => {
     const maker = normalizeAddress(trade.maker)
-    const router = normalizeAddress(trade.router)
-    const routerInfo = router ? facts.contracts[router] : undefined
-    const makerInfo = maker ? facts.contracts[maker] : undefined
     const tags: MakerTag[] = []
-
-    const directHit = Boolean(router && directTargets.has(router))
-    const shadyRouter = Boolean(routerInfo?.contract && !routerInfo.verified)
-    const shadyMaker = Boolean(makerInfo?.contract && !makerInfo.verified)
-    const sandwich = sandwichIds.has(trade.id)
-    if (directHit || shadyRouter || shadyMaker || sandwich) tags.push("bot")
+    if (frontRunning.has(trade.id)) tags.push("bot")
     if (maker && teamWallets.has(maker)) tags.push("team")
     return { ...trade, makerTxCount: counts.get(maker) ?? 0, makerTags: tags }
   })

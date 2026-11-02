@@ -41,7 +41,7 @@ import {
   zonedPartsEndMs,
   zonedPartsToUtc,
 } from "./timezone"
-import { EMPTY_FACTS, annotateTrades, assignTxNumbers, routersToCheck, sandwichBotTradeIds } from "./annotate"
+import { EMPTY_FACTS, annotateTrades, assignTxNumbers, frontRunningById, routersToCheck, sandwichBotTradeIds } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
 import { holderExcludeSet, holdersAt, replayEvmTransfers } from "./holders"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
@@ -608,7 +608,7 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   const user = "0x3333333333333333333333333333333333333333"
   const router = "0x4444444444444444444444444444444444444444"
   const botContract = "0x5555555555555555555555555555555555555555"
-  const make = (id: string, type: Trade["type"], maker: string, to: string, block: number): Trade => ({
+  const make = (id: string, type: Trade["type"], maker: string, to: string, block: number, ts: string): Trade => ({
     ...base,
     id,
     txNo: 0,
@@ -619,12 +619,13 @@ test("counts wallet transactions and tags bots and team wallets", () => {
     makerTags: [],
     blockNumber: block,
     logIndex: 1,
+    timestamp: ts,
   })
   const trades = [
-    make("a", "ADD", lp, router, 10),
-    make("b", "BUY", user, router, 11),
-    make("c", "SELL", user, botContract, 12),
-    make("d", "BUY", dev, router, 13),
+    make("a", "ADD", lp, router, 10, "2024-08-04T15:54:20.000Z"),
+    make("b", "BUY", user, router, 11, "2024-08-04T15:54:23.000Z"),
+    make("c", "SELL", user, botContract, 12, "2024-08-04T15:55:23.000Z"),
+    make("d", "BUY", dev, router, 13, "2024-08-04T15:56:23.000Z"),
   ]
   const facts = {
     contracts: { [router]: { contract: true, verified: true }, [botContract]: { contract: true, verified: false } },
@@ -632,23 +633,22 @@ test("counts wallet transactions and tags bots and team wallets", () => {
   }
   const out = annotateTrades(trades, pool.address, facts)
   assert.deepEqual(out.map((trade) => trade.makerTxCount), [1, 2, 2, 1])
-  assert.deepEqual(out.map((trade) => trade.makerTags), [["team"], [], ["bot"], ["team"]])
+  // Unverified routers alone are not MEV — only DEXTools-style front-running pairs.
+  assert.deepEqual(out.map((trade) => trade.makerTags), [["team"], [], [], ["team"]])
   assert.deepEqual(out.map((trade) => trade.txNo), [1, 2, 3, 4])
   assert.deepEqual(routersToCheck(trades, pool.address, 1), [router])
 })
 
-test("tags direct PoolManager hits and same-block sandwiches as bots", () => {
+test("DEXTools front-running: same-second buy+sell by one maker, not a 5-minute round-trip", () => {
   const manager = "0x000000000004444c5dc75cb358380d2e3de08a90"
   const victim = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   const attacker = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  const casual = "0x863400000000000000000000000000000000866f"
   const base = {
-    timestamp: "2024-08-04T15:54:23.000Z",
     priceUsd: null,
     marketCapUsd: null,
     totalUsd: null,
     priceQuote: null,
-    baseAmount: "1",
-    quoteAmount: "1",
     baseReserve: null,
     quoteReserve: null,
     holders: null,
@@ -660,14 +660,17 @@ test("tags direct PoolManager hits and same-block sandwiches as bots", () => {
     makerTxCount: 0,
     makerTags: [] as Trade["makerTags"],
     txNo: 0,
+    router: manager,
   }
   const trades: Trade[] = [
     {
       ...base,
       id: "front",
+      timestamp: "2024-11-01T17:45:47.000Z",
       type: "BUY",
       maker: attacker,
-      router: manager,
+      baseAmount: "451595",
+      quoteAmount: "0.2786",
       blockNumber: 50,
       logIndex: 1,
       txHash: "0x1",
@@ -675,9 +678,11 @@ test("tags direct PoolManager hits and same-block sandwiches as bots", () => {
     {
       ...base,
       id: "victim",
+      timestamp: "2024-11-01T17:45:47.000Z",
       type: "BUY",
       maker: victim,
-      router: "0x4444444444444444444444444444444444444444",
+      baseAmount: "700000",
+      quoteAmount: "0.4387",
       blockNumber: 50,
       logIndex: 2,
       txHash: "0x2",
@@ -685,19 +690,52 @@ test("tags direct PoolManager hits and same-block sandwiches as bots", () => {
     {
       ...base,
       id: "back",
+      timestamp: "2024-11-01T17:45:47.000Z",
       type: "SELL",
       maker: attacker,
-      router: manager,
+      baseAmount: "451595",
+      quoteAmount: "0.2803",
       blockNumber: 50,
       logIndex: 3,
       txHash: "0x3",
     },
+    {
+      ...base,
+      id: "gta-buy",
+      timestamp: "2024-10-29T19:52:11.000Z",
+      type: "BUY",
+      maker: casual,
+      baseAmount: "904629",
+      quoteAmount: "0.0010",
+      blockNumber: 10,
+      logIndex: 1,
+      txHash: "0x8",
+    },
+    {
+      ...base,
+      id: "gta-sell",
+      timestamp: "2024-10-29T19:57:11.000Z",
+      type: "SELL",
+      maker: casual,
+      baseAmount: "904629",
+      quoteAmount: "0.0012",
+      blockNumber: 16,
+      logIndex: 1,
+      txHash: "0x16",
+    },
   ]
   assert.deepEqual([...sandwichBotTradeIds(trades)].sort(), ["back", "front"])
+  const drains = frontRunningById(trades)
+  assert.ok(Math.abs((drains.get("front") ?? -1) - 0.0017) < 1e-9)
+  assert.equal(drains.has("victim"), false)
+  assert.equal(drains.has("gta-buy"), false)
+  assert.equal(drains.has("gta-sell"), false)
   const out = annotateTrades(trades, pool.address, EMPTY_FACTS, { poolManager: manager })
   assert.ok(out.find((trade) => trade.id === "front")?.makerTags.includes("bot"))
   assert.ok(out.find((trade) => trade.id === "back")?.makerTags.includes("bot"))
   assert.ok(out.find((trade) => trade.id === "victim")?.makerTags.includes("bot") === false)
+  assert.ok(out.find((trade) => trade.id === "gta-buy")?.makerTags.includes("bot") === false)
+  assert.ok(out.find((trade) => trade.id === "gta-sell")?.makerTags.includes("bot") === false)
 })
 
 test("numbers transactions oldest-first and keeps them when reordered", () => {

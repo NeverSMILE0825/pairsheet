@@ -1,7 +1,8 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Bot, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { MevBotIcon } from "@/components/mev-bot-icon"
 import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
@@ -36,7 +37,7 @@ import { AppError } from "@/lib/http"
 import { isPoolId } from "@/lib/pool"
 import { finalizeV4Tape } from "@/lib/v4-tape"
 import { lookUpWallets } from "@/lib/wallets"
-import { EMPTY_FACTS, annotateTrades, makersToCheck, routersToCheck, type WalletFacts } from "@/lib/annotate"
+import { EMPTY_FACTS, annotateTrades, frontRunningById, makersToCheck, routersToCheck, type WalletFacts } from "@/lib/annotate"
 import { csvFilename, tradesToCsv } from "@/lib/csv"
 import {
   compareDecimal,
@@ -298,7 +299,6 @@ export function Exporter() {
   const [gasSavePrompt, setGasSavePrompt] = useState(false)
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
   const [showMevOnly, setShowMevOnly] = useState(false)
-  const [mevBusy, setMevBusy] = useState(false)
   const [savedOpen, setSavedOpen] = useState(false)
   const [syncBusy, setSyncBusy] = useState(false)
   const [syncTokenDraft, setSyncTokenDraft] = useState("")
@@ -503,17 +503,10 @@ export function Exporter() {
     await Promise.all(Array.from({ length: 2 }, worker))
   }
 
-  async function detectMevBots() {
-    if (!pool || rawTrades.length === 0 || phase === "loading") return
-    const token = run.current
-    setMevBusy(true)
+  function detectMevBots() {
+    if (rawTrades.length === 0 || phase === "loading") return
     setShowMevOnly(true)
     setPage(0)
-    try {
-      await lookUpWalletFacts(pool.chainId, pool, rawTrades, token)
-    } finally {
-      if (run.current === token) setMevBusy(false)
-    }
   }
 
   async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []) {
@@ -626,7 +619,6 @@ export function Exporter() {
     selectionAnchor.current = null
     setShowSelectedOnly(false)
     setShowMevOnly(false)
-    setMevBusy(false)
     setIncome(null)
     setFunding(null)
     setHoldersBusy(false)
@@ -762,6 +754,7 @@ export function Exporter() {
     () => annotateTrades(rawTrades, pool?.address ?? "", facts, { poolManager }),
     [rawTrades, pool?.address, facts, poolManager],
   )
+  const mevDrainById = useMemo(() => frontRunningById(rawTrades), [rawTrades])
   const mevCount = useMemo(
     () => trades.filter((trade) => trade.makerTags.includes("bot")).length,
     [trades],
@@ -2178,23 +2171,21 @@ export function Exporter() {
                   size="sm"
                   variant={showMevOnly ? "default" : "outline"}
                   className="h-9 gap-1.5"
-                  disabled={rawTrades.length === 0 || phase === "loading" || mevBusy}
+                  disabled={rawTrades.length === 0 || phase === "loading"}
                   onClick={() => {
-                    if (showMevOnly && !mevBusy) {
+                    if (showMevOnly) {
                       setShowMevOnly(false)
                       setPage(0)
                       return
                     }
-                    void detectMevBots()
+                    detectMevBots()
                   }}
-                  title="Look up routers/makers and show same-block sandwich / unverified-contract / direct-pool MEV bots"
+                  title="Show DEXTools-style front-running: same wallet buy+sell in the same second (or same token amount within 30s). Click again to clear."
                 >
-                  {mevBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Bot className="size-3.5 text-red-500" />}
-                  {mevBusy
-                    ? "Detecting MEV…"
-                    : showMevOnly
-                      ? `MEV bots · ${mevCount.toLocaleString("en-US")}`
-                      : "Detect MEV bots"}
+                  <MevBotIcon className="size-3.5" />
+                  {showMevOnly
+                    ? `MEV bots · ${mevCount.toLocaleString("en-US")}`
+                    : "Detect MEV bots"}
                 </Button>
               </>
             ) : null}
@@ -2756,12 +2747,7 @@ export function Exporter() {
                             <span className="inline-flex items-center justify-end gap-1">
                               {formatQuoteAmount(trade.quoteAmount)}
                               {trade.makerTags.includes("bot") ? (
-                                <span
-                                  className="text-red-500"
-                                  title="MEV / bot: direct PoolManager/pair hit, unverified contract router or maker, or same-block sandwich buy+sell."
-                                >
-                                  <Bot className="size-3.5" aria-label="MEV bot" />
-                                </span>
+                                <MevBotIcon drainEth={mevDrainById.get(trade.id)} className="size-3.5" />
                               ) : null}
                             </span>
                           </td>
@@ -2860,12 +2846,7 @@ export function Exporter() {
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className="inline-flex items-center gap-2">
                               {trade.makerTags.includes("bot") ? (
-                                <span
-                                  className="text-red-500"
-                                  title="MEV / bot: direct PoolManager/pair hit, unverified contract router or maker, or same-block sandwich buy+sell."
-                                >
-                                  <Bot className="size-4" aria-label="MEV bot" />
-                                </span>
+                                <MevBotIcon drainEth={mevDrainById.get(trade.id)} className="size-4" />
                               ) : null}
                               {trade.makerTags.includes("team") ? (
                                 <span
