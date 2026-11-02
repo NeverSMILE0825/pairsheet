@@ -27,9 +27,9 @@ import type { PoolSize } from "./reserves"
 import { getSolanaSwapPage } from "./solana"
 import type { PoolContext, PoolView, RawLog, ServerCursor, SwapsResponse, Trade } from "./types"
 
-const ROUTESCAN_PAGE = 1000
+export const ROUTESCAN_PAGE = 1000
 /** Etherscan-compatible getLogs only returns page*offset ≤ 10_000 rows per query window. */
-const MAX_LOG_PAGE = 10
+export const MAX_LOG_PAGE = 10
 
 export type SwapPageOptions = {
   /** When false, skip receipt fetches used for Gas Price / Gas Fee Total (faster loads). Default true. */
@@ -99,6 +99,7 @@ export async function getSwapPage(
     following = {
       source: chain.routescan ? ("routescan" as const) : ("blockscout" as const),
       page: 1,
+      fromBlock: null,
       toBlock: null,
       blockscoutParams: null,
     }
@@ -111,6 +112,7 @@ export async function getSwapPage(
         triedTopics: [...tried],
         queue: remaining,
         page: following.page,
+        fromBlock: following.fromBlock ?? null,
         toBlock: following.toBlock ?? null,
         blockscoutParams: following.blockscoutParams,
         pool,
@@ -158,6 +160,7 @@ type PageResult = {
   next: {
     source: "routescan" | "blockscout"
     page: number
+    fromBlock?: number | null
     toBlock?: number | null
     blockscoutParams: Record<string, string> | null
   } | null
@@ -170,16 +173,24 @@ async function readPage(
   cursor: ServerCursor | null,
 ): Promise<PageResult> {
   const source = cursor?.source ?? (chain.routescan ? "routescan" : "blockscout")
+  const fromBlock = cursor?.fromBlock ?? null
   const toBlock = cursor?.toBlock ?? null
   if (source === "routescan") {
-    return readRoutescan(chain, pool, topic, cursor?.page ?? 1, toBlock)
+    return readRoutescan(chain, pool, topic, cursor?.page ?? 1, fromBlock, toBlock)
   }
   if (!chain.blockscout) {
     throw new AppError(`No swap index is configured for ${chain.name}.`, 422)
   }
   // V4 needs topic1 (pool id). Prefer the Etherscan-compatible module which supports it.
   if (pool.topic1) {
-    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, cursor?.page ?? 1, toBlock)
+    return readEtherscanLogs(
+      chain.blockscout.replace(/\/$/, ""),
+      pool,
+      topic,
+      cursor?.page ?? 1,
+      fromBlock,
+      toBlock,
+    )
   }
   return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
 }
@@ -189,13 +200,14 @@ async function readRoutescan(
   pool: PoolContext,
   topic: string,
   page: number,
+  fromBlock: number | null = null,
   toBlock: number | null = null,
 ): Promise<PageResult> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: pool.logAddress,
-    fromBlock: "0",
+    fromBlock: fromBlock && fromBlock > 0 ? String(fromBlock) : "0",
     toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
     topic0: topic,
     page: String(page),
@@ -209,19 +221,20 @@ async function readRoutescan(
   const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
   if (!Array.isArray(body.result)) {
     const message = String(body.result || body.message || "no records")
-    if (/no records|no logs|chain not supported|invalid/i.test(message)) {
+    if (/no records|no logs|chain not supported|invalid|result window is too large/i.test(message)) {
       if (/chain not supported/i.test(message) && chain.blockscout) {
         if (pool.topic1) {
-          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, toBlock)
+          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, fromBlock, toBlock)
         }
         return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
       }
+      // Page past the 10k cap with no rows — advance the fromBlock window using prior cursor if any.
       return { logs: [], next: null }
     }
     throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
   }
   const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
-  return { logs, next: nextLogPage("routescan", page, toBlock, logs) }
+  return { logs, next: nextLogPage("routescan", page, fromBlock, toBlock, logs) }
 }
 
 async function readEtherscanLogs(
@@ -229,13 +242,14 @@ async function readEtherscanLogs(
   pool: PoolContext,
   topic: string,
   page: number,
+  fromBlock: number | null = null,
   toBlock: number | null = null,
 ): Promise<PageResult> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: pool.logAddress,
-    fromBlock: "0",
+    fromBlock: fromBlock && fromBlock > 0 ? String(fromBlock) : "0",
     toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
     topic0: topic,
     page: String(page),
@@ -249,28 +263,49 @@ async function readEtherscanLogs(
   const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
   if (!Array.isArray(body.result)) {
     const message = String(body.result || body.message || "no records")
-    if (/no records|no logs|not found|invalid/i.test(message)) return { logs: [], next: null }
+    if (/no records|no logs|not found|invalid|result window is too large/i.test(message)) {
+      return { logs: [], next: null }
+    }
     throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
   }
   const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
-  return { logs, next: nextLogPage("blockscout", page, toBlock, logs) }
+  return { logs, next: nextLogPage("blockscout", page, fromBlock, toBlock, logs) }
 }
 
-function nextLogPage(
+/**
+ * Advance pagination for Etherscan-compatible getLogs.
+ * Those APIs return oldest-first and cap page*offset at 10_000, so after page 10 we
+ * continue by raising fromBlock to the newest block in the last page (inclusive —
+ * callers dedupe by log id).
+ */
+export function nextLogPage(
   source: "routescan" | "blockscout",
   page: number,
+  fromBlock: number | null,
   toBlock: number | null,
   logs: RawLog[],
 ): PageResult["next"] {
   if (logs.length === 0) return null
   if (logs.length < ROUTESCAN_PAGE) return null
-  // Hit the 10k result ceiling for this from/to window — slide toBlock down and restart pages.
-  if (page >= MAX_LOG_PAGE) {
-    const oldest = Math.min(...logs.map((log) => log.blockNumber).filter((block) => block > 0))
-    if (!Number.isFinite(oldest) || oldest <= 1) return null
-    return { source, page: 1, toBlock: oldest - 1, blockscoutParams: null }
+  if (page < MAX_LOG_PAGE) {
+    return {
+      source,
+      page: page + 1,
+      fromBlock: fromBlock ?? null,
+      toBlock: toBlock ?? null,
+      blockscoutParams: null,
+    }
   }
-  return { source, page: page + 1, toBlock: toBlock ?? null, blockscoutParams: null }
+  const newest = Math.max(...logs.map((log) => log.blockNumber).filter((block) => block > 0))
+  if (!Number.isFinite(newest) || newest <= 0) return null
+  // Inclusive: same-block leftovers are kept; exporter/getSwapPage dedupe by trade id.
+  return {
+    source,
+    page: 1,
+    fromBlock: newest,
+    toBlock: toBlock ?? null,
+    blockscoutParams: null,
+  }
 }
 
 function routescanLog(row: unknown): RawLog | null {

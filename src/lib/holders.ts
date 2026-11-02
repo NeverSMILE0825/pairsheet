@@ -165,15 +165,17 @@ async function loadEvmTransfers(
 ): Promise<{ events: TransferEvent[]; truncated: boolean }> {
   const events: TransferEvent[] = []
   const seen = new Set<string>()
-  let windowTo = toBlock
+  // Routescan/Etherscan getLogs are oldest-first and cap at 10k rows per from/to window.
+  // Advance fromBlock forward after each full window (do not lower toBlock).
+  let windowFrom: number | null = null
   let truncated = false
 
   for (let windows = 0; windows < 80; windows += 1) {
     let page = 1
     let windowCount = 0
-    let oldest = Number.POSITIVE_INFINITY
+    let newest = 0
     while (page <= MAX_LOG_PAGE) {
-      const rows = await fetchTransferPage(chain, token, page, windowTo)
+      const rows = await fetchTransferPage(chain, token, page, windowFrom, toBlock)
       if (rows.length === 0) break
       for (const row of rows) {
         const id = `${row.blockNumber}-${row.logIndex}-${row.from}-${row.to}`
@@ -181,7 +183,7 @@ async function loadEvmTransfers(
         seen.add(id)
         events.push(row)
         windowCount += 1
-        if (row.blockNumber > 0 && row.blockNumber < oldest) oldest = row.blockNumber
+        if (row.blockNumber > newest) newest = row.blockNumber
       }
       if (events.length >= MAX_TRANSFER_LOGS) {
         truncated = true
@@ -192,9 +194,10 @@ async function loadEvmTransfers(
     }
     if (truncated) break
     if (windowCount === 0) break
+    // Short / incomplete window → no more history beyond this fromBlock.
     if (page <= MAX_LOG_PAGE && windowCount < ROUTESCAN_PAGE * MAX_LOG_PAGE) break
-    if (!Number.isFinite(oldest) || oldest <= 1) break
-    windowTo = oldest - 1
+    if (newest <= 0) break
+    windowFrom = newest
   }
 
   events.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
@@ -205,13 +208,14 @@ async function fetchTransferPage(
   chain: ChainConfig,
   token: string,
   page: number,
+  fromBlock: number | null,
   toBlock: number | null,
 ): Promise<TransferEvent[]> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: token,
-    fromBlock: "0",
+    fromBlock: fromBlock && fromBlock > 0 ? String(fromBlock) : "0",
     toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
     topic0: TRANSFER_TOPIC,
     page: String(page),

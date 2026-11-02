@@ -101,6 +101,8 @@ export type ServerCursor = {
   triedTopics: string[]
   queue: string[]
   page: number
+  /** Inclusive lower block for the current getLogs window (Routescan/Etherscan are oldest-first). */
+  fromBlock?: number | null
   toBlock?: number | null
   before?: string | null
   blockscoutParams: Record<string, string> | null
