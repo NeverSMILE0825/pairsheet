@@ -106,6 +106,7 @@ import {
 } from "@/lib/saved-analyses"
 import {
   AUTO_ZONE,
+  DEFAULT_ZONE,
   dateToParts,
   detectZone,
   formatParts,
@@ -264,11 +265,11 @@ export function Exporter() {
     typeof window === "undefined" ? defaultDaVisibility() : loadDaVisibility(),
   )
   const [zoneChoice, setZoneChoice] = useState<string>(() => {
-    if (typeof window === "undefined") return AUTO_ZONE
+    if (typeof window === "undefined") return DEFAULT_ZONE
     try {
-      return window.localStorage.getItem(ZONE_KEY) || AUTO_ZONE
+      return window.localStorage.getItem(ZONE_KEY) || DEFAULT_ZONE
     } catch {
-      return AUTO_ZONE
+      return DEFAULT_ZONE
     }
   })
   const [lookupFunders, setLookupFunders] = useState(false)

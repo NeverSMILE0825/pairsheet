@@ -3,8 +3,10 @@ import test from "node:test"
 import {
   buildBehaviourReport,
   findPauses,
+  formatBehaviourReportText,
   formatDuration,
   formatReportNumber,
+  formatReportTime,
   formatWindowParagraph,
 } from "./behaviour-report"
 import type { PoolView, Trade } from "./types"
@@ -152,4 +154,10 @@ test("buildBehaviourReport summarizes windows, pauses, and speed rings", () => {
   assert.match(paragraph, /0\.75 ETH/)
   assert.match(paragraph, /buys\/h/)
   assert.ok(report.story.length > 0)
+  assert.match(formatReportTime("2026-10-29T19:45:11.000Z"), /2026-10-29 15:45:11 ED[TS]/)
+  assert.match(report.pausesStory, /ED[TS]/)
+  const text = formatBehaviourReportText(report, pool)
+  assert.match(text, /Buy & sell behaviour report/)
+  assert.match(text, /Pauses — when and how long/)
+  assert.match(text, /ED[TS]/)
 })

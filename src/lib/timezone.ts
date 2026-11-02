@@ -1,4 +1,6 @@
 export const AUTO_ZONE = "auto"
+/** App default: US Eastern (EST/EDT). */
+export const DEFAULT_ZONE = "America/New_York"
 
 export type DateTimeParts = {
   year: number

@@ -120,7 +120,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Type chips (All / Buys / Sells / Adds / Removes / Init) and Funded by filter the view.",
       "Search matches maker, funder, or tx hash.",
       "Columns opens a checklist for Transactions or Deep Analysis — hide unused fields to reduce sideways scrolling. Choices are remembered on this browser.",
-      "Timezone changes how dates render in the table; CSV always includes UTC and local.",
+      "Timezone defaults to US Eastern (America/New_York — EST/EDT). Changing it updates table dates; CSV always includes UTC and local.",
       "Row checkboxes toggle selection (Shift+click a range). The header checkbox checks or clears only the current page. Click a No cell to toggle that row too.",
       "Show selected filters the table to checked rows only; Show all (or Clear selection) restores the full list.",
     ],
@@ -174,7 +174,8 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: "Plain-English buy/sell behaviour: volumes, pauses, and how pace changed over time.",
     bullets: [
       "After the tape loads, Generate Report opens a modal with counts, quote totals, USD, median clip size, largest clips, and pace for first 15m → 1h → 6h → 12h → 24h → 48h → full tape.",
-      "Pauses lists the longest quiet stretches between consecutive buys/sells — when each started (offset from launch + UTC) and how long it lasted.",
+      "All report timestamps are US Eastern (EST/EDT). Copy in the dialog header puts the full plain-text report on the clipboard.",
+      "Pauses lists the longest quiet stretches between consecutive buys/sells — when each started (offset from launch + Eastern time) and how long it lasted.",
       "How buy / sell speed changed uses non-overlapping rings (launch→15m, 15m→1h, …) with buys/h, sells/h, median waits, and whether each ring sped up or slowed vs the prior one.",
       "Windows are cumulative from the first event timestamp. Figures round to 2 decimals. Uses the full loaded tape (filters do not change the report).",
     ],

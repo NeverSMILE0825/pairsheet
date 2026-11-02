@@ -1,4 +1,8 @@
+import { formatZoned, zoneAbbreviation } from "./timezone"
 import type { PoolView, Side, Trade } from "./types"
+
+/** Reports always render wall-clock times in US Eastern unless overridden. */
+export const REPORT_TIME_ZONE = "America/New_York"
 
 export type ReportWindowId =
   | "15m"
@@ -162,8 +166,11 @@ export function formatDuration(sec: number | null): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
-function isoLabel(iso: string): string {
-  return iso.replace(/\.\d{3}Z$/, " UTC").replace("T", " ")
+/** `2026-10-29 15:45:11 EDT` (or EST) in the report zone. */
+export function formatReportTime(iso: string, timeZone = REPORT_TIME_ZONE): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return `${formatZoned(iso, timeZone)} ${zoneAbbreviation(timeZone, date)}`
 }
 
 function sortByTime(trades: Trade[]): Trade[] {
@@ -337,7 +344,7 @@ function buildPaceStory(segments: SpeedSegment[]): string {
   return parts.join(" ")
 }
 
-function buildPausesStory(pauses: PauseEvent[], thresholdSec: number): string {
+function buildPausesStory(pauses: PauseEvent[], thresholdSec: number, timeZone: string): string {
   if (pauses.length === 0) {
     return `No quiet stretch longer than ${formatDuration(thresholdSec)} showed up between consecutive buys/sells.`
   }
@@ -345,7 +352,7 @@ function buildPausesStory(pauses: PauseEvent[], thresholdSec: number): string {
   return (
     `Notable pauses are quiet stretches of at least ${formatDuration(thresholdSec)} between consecutive buys/sells. ` +
     `The longest lasted ${formatDuration(top.durationSec)}, starting ~${formatDuration(top.offsetSec)} after launch ` +
-    `(${isoLabel(top.startIso)}), after a ${top.afterType.toLowerCase()} until the next ${top.beforeType.toLowerCase()}. ` +
+    `(${formatReportTime(top.startIso, timeZone)}), after a ${top.afterType.toLowerCase()} until the next ${top.beforeType.toLowerCase()}. ` +
     `${pauses.length === 1 ? "That was the only notable pause." : `Showing the ${pauses.length} longest pauses below.`}`
   )
 }
@@ -374,7 +381,7 @@ function buildStory(windows: WindowStats[], quote: string, segments: SpeedSegmen
   )
 }
 
-function noteForWindow(stats: WindowStats, quote: string): string {
+function noteForWindow(stats: WindowStats, quote: string, timeZone: string): string {
   const bits: string[] = []
   if (stats.buys > stats.sells * 1.5) bits.push("Early flow was buy-heavy on count.")
   else if (stats.sells > stats.buys * 1.5) bits.push("Sells led on count in this window.")
@@ -388,7 +395,7 @@ function noteForWindow(stats: WindowStats, quote: string): string {
   if (stats.longestPauseSec != null && stats.longestPauseSec >= 5 * 60) {
     bits.push(
       `Longest quiet stretch here lasted ${formatDuration(stats.longestPauseSec)}` +
-        (stats.longestPauseStartIso ? ` (from ${isoLabel(stats.longestPauseStartIso)})` : "") +
+        (stats.longestPauseStartIso ? ` (from ${formatReportTime(stats.longestPauseStartIso, timeZone)})` : "") +
         ".",
     )
   }
@@ -396,7 +403,11 @@ function noteForWindow(stats: WindowStats, quote: string): string {
 }
 
 /** One plain-English paragraph for a cumulative window. */
-export function formatWindowParagraph(stats: WindowStats, quoteSymbol: string): string {
+export function formatWindowParagraph(
+  stats: WindowStats,
+  quoteSymbol: string,
+  timeZone = REPORT_TIME_ZONE,
+): string {
   const quote = quoteSymbol || "quote"
   const pace =
     stats.buys + stats.sells === 0
@@ -409,14 +420,18 @@ export function formatWindowParagraph(stats: WindowStats, quoteSymbol: string): 
     `sellers took about ${formatReportNumber(stats.sellEthSum)} ${quote} (about ${formatReportUsd(stats.sellUsdSum)}). ` +
     `Typical clip size was about ${formatReportNumber(stats.buyMedEth)} ${quote} on buys and ${formatReportNumber(stats.sellMedEth)} ${quote} on sells. ` +
     `Largest buy about ${formatReportNumber(stats.buyMaxEth)} ${quote}; largest sell about ${formatReportNumber(stats.sellMaxEth)} ${quote}. ` +
-    `Pace: ${pace}.${noteForWindow(stats, quote)}`
+    `Pace: ${pace}.${noteForWindow(stats, quote, timeZone)}`
   )
 }
 
-export function formatPauseParagraph(pause: PauseEvent, index: number): string {
+export function formatPauseParagraph(
+  pause: PauseEvent,
+  index: number,
+  timeZone = REPORT_TIME_ZONE,
+): string {
   return (
     `${index + 1}. Paused for ${formatDuration(pause.durationSec)} starting ~${formatDuration(pause.offsetSec)} after launch ` +
-    `(${isoLabel(pause.startIso)} → ${isoLabel(pause.endIso)}), after a ${pause.afterType.toLowerCase()} until the next ${pause.beforeType.toLowerCase()}.`
+    `(${formatReportTime(pause.startIso, timeZone)} → ${formatReportTime(pause.endIso, timeZone)}), after a ${pause.afterType.toLowerCase()} until the next ${pause.beforeType.toLowerCase()}.`
   )
 }
 
@@ -435,8 +450,13 @@ export function formatSpeedSegmentParagraph(seg: SpeedSegment, prev: SpeedSegmen
 /**
  * Build a buy/sell behaviour report from the loaded tape.
  * Windows are cumulative from the first event timestamp.
+ * Timestamps in the prose use `timeZone` (default: US Eastern).
  */
-export function buildBehaviourReport(trades: Trade[], pool: PoolView): BehaviourReport | null {
+export function buildBehaviourReport(
+  trades: Trade[],
+  pool: PoolView,
+  timeZone = REPORT_TIME_ZONE,
+): BehaviourReport | null {
   const timed = trades.filter((trade) => Number.isFinite(Date.parse(trade.timestamp)))
   if (timed.length === 0) return null
   const times = timed.map((trade) => Date.parse(trade.timestamp))
@@ -463,6 +483,48 @@ export function buildBehaviourReport(trades: Trade[], pool: PoolView): Behaviour
     speedSegments,
     story: buildStory(windows, quote, speedSegments),
     paceStory: buildPaceStory(speedSegments),
-    pausesStory: buildPausesStory(pauses, threshold),
+    pausesStory: buildPausesStory(pauses, threshold, timeZone),
   }
+}
+
+/** Full report as plain text (for clipboard copy). */
+export function formatBehaviourReportText(
+  report: BehaviourReport,
+  pool: PoolView,
+  timeZone = REPORT_TIME_ZONE,
+): string {
+  const lines: string[] = [
+    `Buy & sell behaviour report`,
+    `${pool.baseSymbol} / ${pool.quoteSymbol} · ${pool.dex}`,
+    "",
+    `${pool.baseSymbol} / ${pool.quoteSymbol} on ${pool.dex} from ${formatReportTime(report.startIso, timeZone)} to ${formatReportTime(report.endIso, timeZone)}. How buying and selling changed from launch onward (figures rounded to 2 decimals).`,
+    "",
+  ]
+  for (const window of report.windows) {
+    lines.push(window.label.replace(/^./, (c) => c.toUpperCase()))
+    lines.push(formatWindowParagraph(window, report.quoteSymbol, timeZone))
+    lines.push("")
+  }
+  lines.push("Pauses — when and how long")
+  lines.push(report.pausesStory)
+  if (report.pauses.length > 0) {
+    for (let i = 0; i < report.pauses.length; i++) {
+      lines.push(formatPauseParagraph(report.pauses[i], i, timeZone))
+    }
+  } else {
+    lines.push(`Threshold for a notable pause: ${formatDuration(report.pauseThresholdSec)}.`)
+  }
+  lines.push("")
+  lines.push("How buy / sell speed changed")
+  lines.push(report.paceStory)
+  lines.push("")
+  for (let i = 0; i < report.speedSegments.length; i++) {
+    const seg = report.speedSegments[i]
+    lines.push(seg.label)
+    lines.push(formatSpeedSegmentParagraph(seg, i > 0 ? report.speedSegments[i - 1] : null))
+    lines.push("")
+  }
+  lines.push("How the story shifted")
+  lines.push(report.story)
+  return lines.join("\n").trim() + "\n"
 }

@@ -1,12 +1,15 @@
 "use client"
 
-import { useEffect, useId, useMemo } from "react"
-import { FileText, X } from "lucide-react"
+import { useEffect, useId, useMemo, useState } from "react"
+import { Check, Copy, FileText, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
+  REPORT_TIME_ZONE,
   buildBehaviourReport,
+  formatBehaviourReportText,
   formatDuration,
   formatPauseParagraph,
+  formatReportTime,
   formatSpeedSegmentParagraph,
   formatWindowParagraph,
   type BehaviourReport,
@@ -18,18 +21,28 @@ type Props = {
   onClose: () => void
   pool: PoolView
   trades: Trade[]
+  /** Wall-clock zone for report timestamps (default US Eastern). */
+  timeZone?: string
 }
 
-function isoLabel(iso: string): string {
-  return iso.replace(/\.\d{3}Z$/, " UTC").replace("T", " ")
-}
-
-export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
+export function BehaviourReportDialog({
+  open,
+  onClose,
+  pool,
+  trades,
+  timeZone = REPORT_TIME_ZONE,
+}: Props) {
   const titleId = useId()
+  const [copied, setCopied] = useState(false)
   const report = useMemo((): BehaviourReport | null => {
     if (!open) return null
-    return buildBehaviourReport(trades, pool)
-  }, [open, trades, pool])
+    return buildBehaviourReport(trades, pool, timeZone)
+  }, [open, trades, pool, timeZone])
+
+  const plainText = useMemo(() => {
+    if (!report) return ""
+    return formatBehaviourReportText(report, pool, timeZone)
+  }, [report, pool, timeZone])
 
   useEffect(() => {
     if (!open) return
@@ -39,6 +52,21 @@ export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [open, onClose])
+
+  useEffect(() => {
+    if (!open) setCopied(false)
+  }, [open])
+
+  async function copyReport() {
+    if (!plainText) return
+    try {
+      await navigator.clipboard.writeText(plainText)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
+  }
 
   if (!open) return null
 
@@ -66,9 +94,23 @@ export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
               {pool.baseSymbol} / {pool.quoteSymbol} · {pool.dex}
             </p>
           </div>
-          <Button type="button" size="icon" variant="ghost" aria-label="Close report" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5"
+              disabled={!report}
+              onClick={() => void copyReport()}
+              title="Copy the full report text"
+            >
+              {copied ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button type="button" size="icon" variant="ghost" aria-label="Close report" onClick={onClose}>
+              <X className="size-4" />
+            </Button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 text-sm leading-relaxed sm:px-5">
@@ -77,15 +119,17 @@ export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
           ) : (
             <>
               <p className="text-muted-foreground">
-                {pool.baseSymbol} / {pool.quoteSymbol} on {pool.dex} from {isoLabel(report.startIso)} to{" "}
-                {isoLabel(report.endIso)}. How buying and selling changed from launch onward (figures
-                rounded to 2 decimals).
+                {pool.baseSymbol} / {pool.quoteSymbol} on {pool.dex} from {formatReportTime(report.startIso, timeZone)}{" "}
+                to {formatReportTime(report.endIso, timeZone)}. How buying and selling changed from launch
+                onward (figures rounded to 2 decimals).
               </p>
 
               {report.windows.map((window) => (
                 <section key={window.id} className="space-y-1.5">
-                  <h3 className="text-sm font-semibold text-foreground capitalize">{window.label}</h3>
-                  <p className="text-foreground/90">{formatWindowParagraph(window, report.quoteSymbol)}</p>
+                  <h3 className="text-sm font-semibold capitalize text-foreground">{window.label}</h3>
+                  <p className="text-foreground/90">
+                    {formatWindowParagraph(window, report.quoteSymbol, timeZone)}
+                  </p>
                 </section>
               ))}
 
@@ -95,7 +139,9 @@ export function BehaviourReportDialog({ open, onClose, pool, trades }: Props) {
                 {report.pauses.length > 0 ? (
                   <ul className="list-none space-y-2 text-foreground/90">
                     {report.pauses.map((pause, index) => (
-                      <li key={`${pause.startIso}-${pause.endIso}`}>{formatPauseParagraph(pause, index)}</li>
+                      <li key={`${pause.startIso}-${pause.endIso}`}>
+                        {formatPauseParagraph(pause, index, timeZone)}
+                      </li>
                     ))}
                   </ul>
                 ) : (
