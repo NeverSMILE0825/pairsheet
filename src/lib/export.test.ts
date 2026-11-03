@@ -44,7 +44,14 @@ import {
 import { EMPTY_FACTS, annotateTrades, assignTxNumbers, frontRunningById, routersToCheck, sandwichBotTradeIds } from "./annotate"
 import { decodeSolanaSwap } from "./solana"
 import { holderExcludeSet, holdersAt, replayEvmTransfers } from "./holders"
-import { pickBaseTotalSupply, supplyFromFdv, supplyFromNormalizedTotal } from "./pool"
+import {
+  marketCapsDrift,
+  pickBaseTotalSupply,
+  repriceMarketCaps,
+  suppliesDiffer,
+  supplyFromFdv,
+  supplyFromNormalizedTotal,
+} from "./pool"
 import { assignSync, loadPoolSizes, recordSync, swapKey, v4VirtualReserves, type SyncEvent } from "./reserves"
 import { EXAMPLE_URL, parseDextoolsUrl } from "./parse-url"
 import type { PoolContext, PoolView, RawLog, Trade } from "./types"
@@ -576,6 +583,40 @@ test("base total supply prefers normalized token supply over pool FDV÷price", (
   assert.equal(pickBaseTotalSupply("1000000000", inflated), "1000000000")
   assert.equal(pickBaseTotalSupply(null, inflated), inflated)
   assert.equal(marketCapFromPrice("0.00050824", "1000000000"), "508240")
+})
+
+test("opening a saved tape reprices market caps when implied supply drifts", () => {
+  const inflated = "25000000000"
+  const real = "1000000000"
+  assert.equal(suppliesDiffer(inflated, real), true)
+  assert.equal(suppliesDiffer(real, real), false)
+  assert.equal(suppliesDiffer(null, real), true)
+  const saved = [
+    {
+      ...({} as Trade),
+      priceUsd: "0.000002307",
+      marketCapUsd: marketCapFromPrice("0.000002307", inflated),
+    },
+    {
+      ...({} as Trade),
+      priceUsd: "0.00050824",
+      marketCapUsd: marketCapFromPrice("0.00050824", inflated),
+    },
+    { ...({} as Trade), priceUsd: null, marketCapUsd: "999" },
+  ]
+  assert.equal(marketCapsDrift(saved, real), true)
+  assert.equal(marketCapsDrift(saved, inflated), false)
+  const fixed = repriceMarketCaps(saved, real)
+  assert.equal(fixed.changed, true)
+  assert.equal(fixed.trades[0].marketCapUsd, marketCapFromPrice("0.000002307", real))
+  assert.equal(fixed.trades[1].marketCapUsd, "508240")
+  assert.equal(fixed.trades[2].marketCapUsd, "999")
+  assert.equal(marketCapsDrift(fixed.trades, real), false)
+  const initAlreadyFixed = [
+    { priceUsd: "0.000002307", marketCapUsd: marketCapFromPrice("0.000002307", real) },
+    { priceUsd: "0.00050824", marketCapUsd: marketCapFromPrice("0.00050824", inflated) },
+  ]
+  assert.equal(marketCapsDrift(initAlreadyFixed, real), true)
 })
 
 test("detects the Solana wallet that funded a maker with SOL", () => {

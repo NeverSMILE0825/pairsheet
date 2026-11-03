@@ -151,6 +151,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Save analysis stores the full tape (trades, facts, holders) in this browser’s IndexedDB. There is no 10-pair (or any) count limit on bookmarks or the shared list.",
       "If this browser runs out of storage, Pair Sheet drops older full tapes first (starred last) but keeps every bookmark row. Open still lists them; missing tapes reload from chain.",
       "Open lists local snapshots plus the shared GitHub bookmark list. Shared rows reload from chain if this PC has no snapshot.",
+      "Opening a saved tape rechecks the base token’s total supply. If stored market caps were built from a bad supply (Gecko pool FDV), Pair Sheet recomputes every M. Cap and writes the corrected snapshot back on this browser.",
       "Delete (trash) asks for confirmation, then removes the pair and shows whether it succeeded. With sync on, it also drops the row from the shared list.",
       "Export / Import a JSON vault to move full snapshots between browsers without GitHub.",
       "Enable sync with a fine-grained GitHub PAT (Contents: Read and Write on NeverSMILE0825/pairsheet). Publish now writes public/data/bookmarks.json.",
@@ -158,6 +159,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Other PCs only need to open the site and click Open to see the shared list — no token required to read.",
     ],
     examples: [
+      {
+        title: "Saved GROKLET market caps",
+        body: "A snapshot saved while supply came from pool FDV shows Max near $12.58M. Open that pair after updating Pair Sheet: M. Cap is rewritten as price × 1B supply (Max ≈ $508K) and the corrected tape is stored again.",
+      },
       {
         title: "Cross-PC flow",
         body: "PC A: Save analysis → Enable sync → Publish now (badge shows Synced · N pair(s)). PC B: open pairsheet → Open → shared list → Open a pair to reload from chain.",

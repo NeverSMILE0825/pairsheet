@@ -34,7 +34,7 @@ import { resolveFunders } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
 import { getSwapPage } from "@/lib/history"
 import { AppError } from "@/lib/http"
-import { isPoolId } from "@/lib/pool"
+import { isPoolId, marketCapsDrift, repriceMarketCaps, resolveTokenTotalSupply, suppliesDiffer } from "@/lib/pool"
 import { finalizeV4Tape } from "@/lib/v4-tape"
 import { lookUpWallets } from "@/lib/wallets"
 import { EMPTY_FACTS, annotateTrades, frontRunningById, makersToCheck, routersToCheck, type WalletFacts } from "@/lib/annotate"
@@ -1218,11 +1218,55 @@ export function Exporter() {
           repaired = result.changed
           stillMissing = result.missing
         }
-        trades = polishTape(saved.pool, trades)
+        let poolView = saved.pool
+        const chain = getChain(saved.pool.chainId)
+        if (chain && saved.pool.baseAddress) {
+          setProgress("Checking market cap supply…")
+          const fresh = await resolveTokenTotalSupply(chain, saved.pool.baseAddress).catch(() => null)
+          if (run.current !== token) return
+          if (
+            fresh &&
+            (suppliesDiffer(poolView.baseTotalSupply, fresh) || marketCapsDrift(trades, fresh))
+          ) {
+            poolView = { ...poolView, baseTotalSupply: fresh }
+          }
+        }
+        trades = polishTape(poolView, trades)
+        let supplyFixed = false
+        if (poolView.baseTotalSupply && marketCapsDrift(trades, poolView.baseTotalSupply)) {
+          const repriced = repriceMarketCaps(trades, poolView.baseTotalSupply)
+          trades = repriced.trades
+          supplyFixed = repriced.changed
+        }
+        setPool(poolView)
         setTrades(trades)
         setPhase("done")
         setProgress("")
-        if (repaired) {
+        if (supplyFixed) {
+          await saveAnalysis({
+            url: saved.url,
+            pool: poolView,
+            trades,
+            facts: saved.facts,
+            warning: saved.warning,
+            capped: saved.capped,
+            savedAt: saved.savedAt,
+            starred: meta?.starred,
+          }).catch(() => null)
+          await refreshSavedList().catch(() => null)
+        }
+        if (repaired && supplyFixed) {
+          flashNotice(
+            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}, refreshed gas, and corrected market caps from the token’s total supply.`,
+            stillMissing > 0 ? "info" : "ok",
+          )
+          setGasSavePrompt(stillMissing > 0 || repaired)
+        } else if (supplyFixed) {
+          flashNotice(
+            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and corrected market caps from the token’s total supply.`,
+            "ok",
+          )
+        } else if (repaired) {
           flashNotice(
             stillMissing > 0
               ? `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}; refreshed gas but ${stillMissing.toLocaleString("en-US")} txs still lack receipts.`

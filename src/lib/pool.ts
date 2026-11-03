@@ -1,9 +1,9 @@
 import type { ChainConfig } from "./chains"
 import { decodeAbiString, sameAddress } from "./decode"
-import { formatUnits } from "./format"
+import { formatUnits, marketCapFromPrice } from "./format"
 import { AppError, fetchJson, rpcCall } from "./http"
 import { isStableSymbol } from "./prices"
-import type { PoolContext, PoolStyle, TokenInfo } from "./types"
+import type { PoolContext, PoolStyle, TokenInfo, Trade } from "./types"
 
 const NATIVE = "0x0000000000000000000000000000000000000000"
 
@@ -310,16 +310,80 @@ export function pickBaseTotalSupply(
   return tokenSupply ?? fdvSupply
 }
 
+/** True when two supplies disagree by more than 0.5% (or one side is missing). */
+export function suppliesDiffer(stored: string | null, fresh: string | null): boolean {
+  if (!fresh) return false
+  const next = Number(fresh)
+  if (!(next > 0) || !Number.isFinite(next)) return false
+  if (stored == null || stored === "") return true
+  const prev = Number(stored)
+  if (!(prev > 0) || !Number.isFinite(prev)) return true
+  const ratio = prev / next
+  return ratio < 0.995 || ratio > 1.005
+}
+
+/**
+ * Saved tapes store marketCapUsd. True when any priced row’s implied supply
+ * (mcap ÷ price) disagrees with the token’s real total supply.
+ * Later rows must be checked: V4 polish rewrites INIT before buys are fixed.
+ */
+export function marketCapsDrift(
+  trades: Pick<Trade, "priceUsd" | "marketCapUsd">[],
+  supply: string,
+): boolean {
+  const fresh = Number(supply)
+  if (!(fresh > 0) || !Number.isFinite(fresh)) return false
+  for (const trade of trades) {
+    const price = Number(trade.priceUsd)
+    const cap = Number(trade.marketCapUsd)
+    if (!(price > 0) || !(cap > 0)) continue
+    const ratio = cap / price / fresh
+    if (ratio < 0.995 || ratio > 1.005) return true
+  }
+  return false
+}
+
+/** Rewrite market caps from each row’s unit price × supply. Rows without a price stay as stored. */
+export function repriceMarketCaps(trades: Trade[], supply: string): { trades: Trade[]; changed: boolean } {
+  let changed = false
+  const next = trades.map((trade) => {
+    if (!trade.priceUsd) return trade
+    const marketCapUsd = marketCapFromPrice(trade.priceUsd, supply)
+    if (marketCapUsd == null || marketCapUsd === trade.marketCapUsd) return trade
+    changed = true
+    return { ...trade, marketCapUsd }
+  })
+  return { trades: changed ? next : trades, changed }
+}
+
 export async function loadGeckoTokenSupply(
+  chain: ChainConfig,
+  tokenAddress: string,
+): Promise<string | null> {
+  const resolved = await resolveTokenTotalSupply(chain, tokenAddress)
+  return resolved
+}
+
+/** Gecko normalized supply, then on-chain totalSupply. Used to repair saved tapes. */
+export async function resolveTokenTotalSupply(
   chain: ChainConfig,
   tokenAddress: string,
 ): Promise<string | null> {
   if (!tokenAddress || isNativeToken(tokenAddress)) return null
   const url = `https://api.geckoterminal.com/api/v2/networks/${chain.gecko}/tokens/${tokenAddress}`
-  const body = (await fetchJson(url, { headers: { accept: "application/json;version=20230302" } })) as {
-    data?: { attributes?: Record<string, unknown> }
+  try {
+    const body = (await fetchJson(url, { headers: { accept: "application/json;version=20230302" } })) as {
+      data?: { attributes?: Record<string, unknown> }
+    }
+    const attributes = body.data?.attributes ?? {}
+    const normalized = supplyFromNormalizedTotal(attributes)
+    if (normalized) return normalized
+    const decimals = Number(attributes.decimals)
+    const places = Number.isInteger(decimals) && decimals >= 0 && decimals <= 36 ? decimals : 18
+    return await loadOnChainTotalSupply(chain, tokenAddress, places)
+  } catch {
+    return loadOnChainTotalSupply(chain, tokenAddress, 18).catch(() => null)
   }
-  return supplyFromNormalizedTotal(body.data?.attributes ?? {})
 }
 
 async function loadOnChainTotalSupply(
