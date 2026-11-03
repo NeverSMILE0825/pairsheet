@@ -1,18 +1,31 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-03T01:27:28.678Z",
+  "updatedAt": "2026-11-03T13:58:50.547Z",
   "bookmarks": [
+    {
+      "id": "ether:0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
+      "savedAt": "2026-11-03T13:58:48.334Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
+      "dex": "Uniswap V4 (Ethereum)",
+      "baseSymbol": "MINIMALISM",
+      "quoteSymbol": "WETH",
+      "tradeCount": 306,
+      "starred": false
+    },
     {
       "id": "ether:0xc4fc30660423bd04ae1038c2910437d4c2e337498f19cea23df90f4c3e5cf88f",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0xc4fc30660423bd04ae1038c2910437d4c2e337498f19cea23df90f4c3e5cf88f",
-      "savedAt": "2026-11-03T01:27:25.507Z",
+      "savedAt": "2026-11-03T13:04:20.727Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0xc4fc30660423bd04ae1038c2910437d4c2e337498f19cea23df90f4c3e5cf88f",
       "dex": "Uniswap V4 (Ethereum)",
       "baseSymbol": "GTA6",
       "quoteSymbol": "ETH",
-      "tradeCount": 16416,
+      "tradeCount": 16688,
       "starred": true
     },
     {
@@ -40,19 +53,6 @@
       "quoteSymbol": "ETH",
       "tradeCount": 5661,
       "starred": true
-    },
-    {
-      "id": "ether:0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
-      "savedAt": "2026-10-31T23:27:15.291Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0x0a572c381f1ec83224e6f8a1ddea9b9627a93150da38c4c8ebb6b104b0b58da3",
-      "dex": "Uniswap V4 (Ethereum)",
-      "baseSymbol": "MINIMALISM",
-      "quoteSymbol": "WETH",
-      "tradeCount": 288,
-      "starred": false
     },
     {
       "id": "ether:0xffd41513dff8f09edf8dec08790a1f41c1e6e8ee",
