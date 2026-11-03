@@ -32,6 +32,7 @@ import {
 } from "@/lib/table-columns"
 import { resolveFunders } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
+import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
 import { getSwapPage, mergeNewTrades, newestTradeBlock } from "@/lib/history"
 import { AppError } from "@/lib/http"
 import { isPoolId, marketCapsDrift, repriceMarketCaps, resolveTokenTotalSupply, suppliesDiffer } from "@/lib/pool"
@@ -121,7 +122,7 @@ import {
 } from "@/lib/timezone"
 import type { PoolView, SwapsResponse, Trade } from "@/lib/types"
 
-type TableView = "transactions" | "minutes"
+type TableView = "transactions" | "minutes" | "blacklist"
 
 type PeriodFilter = { startMs: number; endMs: number }
 
@@ -302,6 +303,9 @@ export function Exporter() {
   })
   const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [blacklistIds, setBlacklistIds] = useState<string[]>([])
+  const [blacklistSelected, setBlacklistSelected] = useState<Set<string>>(new Set())
+  const [blacklistKeyLoaded, setBlacklistKeyLoaded] = useState("")
   const [income, setIncome] = useState<Income | null>(null)
   const [reportOpen, setReportOpen] = useState(false)
   const [startAt, setStartAt] = useState<DateTimeParts | null>(null)
@@ -354,8 +358,28 @@ export function Exporter() {
   }, [])
 
   useEffect(() => {
-    if (showSelectedOnly && selected.size === 0) setShowSelectedOnly(false)
-  }, [showSelectedOnly, selected])
+    const picked = tableView === "blacklist" ? blacklistSelected : selected
+    if (showSelectedOnly && picked.size === 0) setShowSelectedOnly(false)
+  }, [showSelectedOnly, selected, blacklistSelected, tableView])
+
+  const blacklistKey = pool ? blacklistPoolKey(pool.chainId, pool.address) : ""
+
+  useEffect(() => {
+    if (!blacklistKey) {
+      setBlacklistIds([])
+      setBlacklistSelected(new Set())
+      setBlacklistKeyLoaded("")
+      return
+    }
+    setBlacklistIds(readBlacklist(blacklistKey))
+    setBlacklistSelected(new Set())
+    setBlacklistKeyLoaded(blacklistKey)
+  }, [blacklistKey])
+
+  useEffect(() => {
+    if (!blacklistKey || blacklistKeyLoaded !== blacklistKey) return
+    writeBlacklist(blacklistKey, blacklistIds)
+  }, [blacklistKey, blacklistKeyLoaded, blacklistIds])
 
   tradesRef.current = rawTrades
   liveApi.current = {
@@ -896,45 +920,44 @@ export function Exporter() {
     }
   }, [trades, zone])
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    const rows = trades.filter((trade) => {
-      if (showSelectedOnly && !selected.has(trade.id)) return false
-      if (showMevOnly && !trade.makerTags.includes("bot")) return false
-      if (filter !== "ALL" && trade.type !== filter) return false
-      if (funder === "__none__" && trade.fundedByAddress) return false
-      if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
-      if (period) {
-        const time = Date.parse(trade.timestamp)
-        if (!Number.isFinite(time) || time < period.startMs || time > period.endMs) return false
-      }
-      if (!needle) return true
-      return (
-        trade.maker.includes(needle) ||
-        trade.txHash.includes(needle) ||
-        (trade.fundedBy ?? "").toLowerCase().includes(needle) ||
-        (trade.fundedByAddress ?? "").includes(needle)
-      )
-    })
-    const direction = sortDesc ? -1 : 1
-    return [...rows].sort((a, b) => {
-      if (sortKey === "selected") {
-        const diff = Number(selected.has(a.id)) - Number(selected.has(b.id))
-        return diff * direction || compareTrades(b, a, "timestamp")
-      }
-      if (sortKey === "others") {
-        return (tagWeight(a) - tagWeight(b)) * direction || compareTrades(b, a, "timestamp")
-      }
-      if (sortKey === "makerTxCount") {
-        const diff = a.makerTxCount - b.makerTxCount
-        return diff * direction || a.maker.localeCompare(b.maker) || compareTrades(b, a, "timestamp")
-      }
-      const missingA = isMissing(a, sortKey)
-      const missingB = isMissing(b, sortKey)
-      if (missingA !== missingB) return missingA ? 1 : -1
-      return compareTrades(a, b, sortKey) * direction
-    })
-  }, [trades, filter, funder, query, sortKey, sortDesc, selected, period, showSelectedOnly, showMevOnly])
+  const tapeQuery = useMemo(
+    () => ({
+      query,
+      filter,
+      funder,
+      period,
+      showSelectedOnly,
+      showMevOnly,
+      sortKey,
+      sortDesc,
+    }),
+    [query, filter, funder, period, showSelectedOnly, showMevOnly, sortKey, sortDesc],
+  )
+
+  const filtered = useMemo(
+    () => arrangeTape(trades, selected, tapeQuery),
+    [trades, selected, tapeQuery],
+  )
+
+  const blacklistTrades = useMemo(() => {
+    if (blacklistIds.length === 0 || trades.length === 0) return [] as Trade[]
+    const byId = new Map(trades.map((trade) => [trade.id, trade]))
+    const rows: Trade[] = []
+    for (const id of blacklistIds) {
+      const trade = byId.get(id)
+      if (trade) rows.push(trade)
+    }
+    return rows
+  }, [trades, blacklistIds])
+
+  const blacklistFiltered = useMemo(
+    () => arrangeTape(blacklistTrades, blacklistSelected, tapeQuery),
+    [blacklistTrades, blacklistSelected, tapeQuery],
+  )
+
+  const viewingBlacklist = tableView === "blacklist"
+  const activeTape = viewingBlacklist ? blacklistFiltered : filtered
+  const activeSelected = viewingBlacklist ? blacklistSelected : selected
 
   /** Minute tape ignores type filter so Buy/Sell columns both stay meaningful. */
   const minuteSource = useMemo(() => {
@@ -989,7 +1012,7 @@ export function Exporter() {
     applyIntervalMs(ms, "custom")
   }
 
-  const listLength = tableView === "minutes" ? minuteRows.length : filtered.length
+  const listLength = tableView === "minutes" ? minuteRows.length : activeTape.length
   const txColCount = countVisible(txColumns)
   const daColCount = countVisible(daColumns)
   const showTx = (id: TxColumnId) => txColumns[id]
@@ -1027,8 +1050,8 @@ export function Exporter() {
   const pageCount = Math.max(1, Math.ceil(listLength / pageSize))
   const currentPage = Math.min(page, pageCount - 1)
   const pageRows = useMemo(
-    () => filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize),
-    [filtered, currentPage, pageSize],
+    () => activeTape.slice(currentPage * pageSize, (currentPage + 1) * pageSize),
+    [activeTape, currentPage, pageSize],
   )
   const minutePageRows = useMemo(
     () => minuteRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize),
@@ -1056,17 +1079,57 @@ export function Exporter() {
     }
   }, [trades])
 
-  const allVisibleSelected = pageRows.length > 0 && pageRows.every((trade) => selected.has(trade.id))
-  const someVisibleSelected = pageRows.some((trade) => selected.has(trade.id))
-  const allMatchingSelected = filtered.length > 0 && filtered.every((trade) => selected.has(trade.id))
+  const allVisibleSelected = pageRows.length > 0 && pageRows.every((trade) => activeSelected.has(trade.id))
+  const someVisibleSelected = pageRows.some((trade) => activeSelected.has(trade.id))
+  const allMatchingSelected = activeTape.length > 0 && activeTape.every((trade) => activeSelected.has(trade.id))
 
   function changeSelection(update: (draft: Set<string>) => void) {
-    setSelected((current) => {
+    const setter = tableView === "blacklist" ? setBlacklistSelected : setSelected
+    setter((current) => {
       const next = new Set(current)
       update(next)
       return next
     })
     setIncome(null)
+  }
+
+  function addCheckedToBlacklist(triggerId: string) {
+    if (!selected.has(triggerId)) return
+    const incoming = trades.filter((trade) => selected.has(trade.id)).map((trade) => trade.id)
+    const next = addBlacklistIds(blacklistIds, incoming)
+    const added = next.length - blacklistIds.length
+    if (added === 0) {
+      flashNotice("Those checked transactions are already in the blacklist.", "info")
+      return
+    }
+    setBlacklistIds(next)
+    flashNotice(
+      `Added ${added.toLocaleString("en-US")} transaction${added === 1 ? "" : "s"} to the blacklist.`,
+      "ok",
+    )
+  }
+
+  function removeCheckedFromBlacklist(triggerId: string) {
+    if (!blacklistSelected.has(triggerId)) return
+    const next = removeBlacklistIds(blacklistIds, blacklistSelected)
+    const removed = blacklistIds.length - next.length
+    setBlacklistIds(next)
+    setBlacklistSelected(new Set())
+    setIncome(null)
+    if (removed > 0) {
+      flashNotice(
+        `Removed ${removed.toLocaleString("en-US")} transaction${removed === 1 ? "" : "s"} from the blacklist.`,
+        "ok",
+      )
+    }
+  }
+
+  function emptyBlacklist() {
+    if (blacklistIds.length === 0) return
+    setBlacklistIds([])
+    setBlacklistSelected(new Set())
+    setIncome(null)
+    flashNotice("Blacklist cleared.", "ok")
   }
 
   function toggleTrade(id: string) {
@@ -1080,13 +1143,14 @@ export function Exporter() {
    * anchor and this one (current filtered table order).
    */
   function selectTrade(trade: Trade, shiftKey: boolean) {
-    const index = filtered.findIndex((row) => row.id === trade.id)
+    const list = tableView === "blacklist" ? blacklistFiltered : filtered
+    const index = list.findIndex((row) => row.id === trade.id)
     if (index < 0) return
     if (shiftKey && selectionAnchor.current !== null) {
       const from = Math.min(selectionAnchor.current, index)
       const to = Math.max(selectionAnchor.current, index)
       changeSelection((draft) => {
-        for (let i = from; i <= to; i += 1) draft.add(filtered[i].id)
+        for (let i = from; i <= to; i += 1) draft.add(list[i].id)
       })
       selectionAnchor.current = index
       return
@@ -1105,14 +1169,15 @@ export function Exporter() {
         for (const id of pageIds) draft.add(id)
       }
     })
-    selectionAnchor.current = pageRows.length > 0 ? filtered.findIndex((row) => row.id === pageRows[0].id) : null
+    selectionAnchor.current = pageRows.length > 0 ? activeTape.findIndex((row) => row.id === pageRows[0].id) : null
   }
 
   function selectAllMatching() {
+    const list = tableView === "blacklist" ? blacklistFiltered : filtered
     changeSelection((draft) => {
-      for (const trade of filtered) draft.add(trade.id)
+      for (const trade of list) draft.add(trade.id)
     })
-    selectionAnchor.current = filtered.length > 0 ? 0 : null
+    selectionAnchor.current = list.length > 0 ? 0 : null
   }
 
   function selectByTxNo() {
@@ -1124,7 +1189,9 @@ export function Exporter() {
     }
     const lo = Math.min(from, to)
     const hi = Math.max(from, to)
-    const matches = trades.filter((trade) => trade.txNo >= lo && trade.txNo <= hi)
+    const source = tableView === "blacklist" ? blacklistTrades : trades
+    const list = tableView === "blacklist" ? blacklistFiltered : filtered
+    const matches = source.filter((trade) => trade.txNo >= lo && trade.txNo <= hi)
     if (matches.length === 0) {
       setNoError(`No transactions with No ${lo.toLocaleString("en-US")}—${hi.toLocaleString("en-US")}.`)
       return
@@ -1133,12 +1200,15 @@ export function Exporter() {
       for (const trade of matches) draft.add(trade.id)
     })
     setNoError(null)
-    const first = filtered.findIndex((row) => row.id === matches[0].id)
+    const first = list.findIndex((row) => row.id === matches[0].id)
     selectionAnchor.current = first >= 0 ? first : null
   }
 
   function calculateIncome() {
-    const chosen = trades.filter((trade) => selected.has(trade.id))
+    const onBlacklist = tableView === "blacklist"
+    const source = onBlacklist ? blacklistTrades : trades
+    const picked = onBlacklist ? blacklistSelected : selected
+    const chosen = source.filter((trade) => picked.has(trade.id))
     if (chosen.length === 0) return
     const buys = chosen.filter((trade) => trade.type === "BUY")
     const sells = chosen.filter((trade) => trade.type === "SELL")
@@ -2232,6 +2302,7 @@ export function Exporter() {
                   [
                     ["transactions", "Transactions"],
                     ["minutes", "Deep Analysis"],
+                    ["blacklist", "Blacklist"],
                   ] as const
                 ).map(([view, label]) => (
                   <button
@@ -2250,13 +2321,30 @@ export function Exporter() {
                     }}
                   >
                     {label}
+                    {view === "blacklist" && blacklistIds.length > 0
+                      ? ` · ${blacklistIds.length.toLocaleString("en-US")}`
+                      : ""}
                   </button>
                 ))}
               </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9"
+                disabled={blacklistIds.length === 0}
+                onClick={emptyBlacklist}
+              >
+                Empty blacklist
+              </Button>
             </div>
             {tableView === "minutes" ? (
               <p className="text-sm text-muted-foreground">
                 Deep Analysis Â· buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
+              </p>
+            ) : tableView === "blacklist" ? (
+              <p className="text-sm text-muted-foreground">
+                Checked swaps kept aside. Calculate Income here uses only this table.
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, gas, and funders.</p>
@@ -2334,7 +2422,7 @@ export function Exporter() {
           ) : null}
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            {tableView === "transactions" ? (
+            {tableView !== "minutes" ? (
             <div className="flex gap-1 rounded-lg bg-muted p-1">
               {(Object.keys(FILTER_LABELS) as SideFilter[]).map((side) => (
                 <button
@@ -2371,7 +2459,7 @@ export function Exporter() {
                 ))}
               </select>
             </label>
-            {tableView === "transactions" ? (
+            {tableView !== "minutes" ? (
               <>
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   Funded by
@@ -2427,7 +2515,7 @@ export function Exporter() {
                 </Button>
               </>
             ) : null}
-            {tableView === "transactions" ? (
+            {tableView !== "minutes" ? (
               <ColumnsMenu
                 defs={TX_COLUMN_DEFS}
                 visibility={txColumns}
@@ -2460,25 +2548,27 @@ export function Exporter() {
             )}
           </div>
 
-          {tableView === "transactions" ? (
+          {tableView !== "minutes" ? (
           <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10">
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={selected.size === 0}>
+              <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={activeSelected.size === 0}>
                 <Calculator />
                 Calculate Income
               </Button>
               <p className="text-sm text-muted-foreground" aria-live="polite">
-                {selected.size === 0
-                  ? "Tick rows, Shift+click a range, or select by No — then calculate."
-                  : `${selected.size.toLocaleString("en-US")} transaction${selected.size === 1 ? "" : "s"} selected`}
+                {activeSelected.size === 0
+                  ? tableView === "blacklist"
+                    ? "Tick blacklist rows, then calculate. Trash removes the checked rows."
+                    : "Tick rows, then >> in Others to blacklist them. Shift+click selects a range."
+                  : `${activeSelected.size.toLocaleString("en-US")} transaction${activeSelected.size === 1 ? "" : "s"} selected`}
               </p>
-              {filtered.length > pageRows.length && !allMatchingSelected ? (
+              {activeTape.length > pageRows.length && !allMatchingSelected ? (
                 <button
                   type="button"
                   className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
                   onClick={selectAllMatching}
                 >
-                  Select all {filtered.length.toLocaleString("en-US")} matching
+                  Select all {activeTape.length.toLocaleString("en-US")} matching
                 </button>
               ) : null}
               <div className="flex flex-wrap items-center gap-2 rounded-xl bg-muted/50 px-2.5 py-1.5 ring-1 ring-foreground/10">
@@ -2534,7 +2624,7 @@ export function Exporter() {
                 variant={showSelectedOnly ? "default" : "outline"}
                 size="sm"
                 className="h-8"
-                disabled={selected.size === 0 && !showSelectedOnly}
+                disabled={activeSelected.size === 0 && !showSelectedOnly}
                 aria-pressed={showSelectedOnly}
                 onClick={() => {
                   setShowSelectedOnly((current) => !current)
@@ -2547,8 +2637,8 @@ export function Exporter() {
                 }
               >
                 {showSelectedOnly
-                  ? `Show all${filtered.length > 0 ? ` Â· ${filtered.length.toLocaleString("en-US")}` : ""}`
-                  : `Show selected${selected.size > 0 ? ` Â· ${selected.size.toLocaleString("en-US")}` : ""}`}
+                  ? `Show all${activeTape.length > 0 ? ` · ${activeTape.length.toLocaleString("en-US")}` : ""}`
+                  : `Show selected${activeSelected.size > 0 ? ` · ${activeSelected.size.toLocaleString("en-US")}` : ""}`}
               </Button>
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <DateTimeField
@@ -2577,7 +2667,7 @@ export function Exporter() {
                   <CalendarRange />
                   Extract
                 </Button>
-                {selected.size > 0 || showSelectedOnly ? (
+                {activeSelected.size > 0 || showSelectedOnly ? (
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-sm text-foreground hover:bg-accent"
@@ -2625,7 +2715,7 @@ export function Exporter() {
           </div>
           ) : null}
 
-          {tableView === "transactions" && income ? (
+          {tableView !== "minutes" && income ? (
             <div className="rounded-2xl bg-card p-4 ring-1 ring-primary/40" role="region" aria-label="Income result">
               <p className="text-xs tracking-wide text-muted-foreground uppercase">
                 Sum of {pool.quoteSymbol} in {income.count.toLocaleString("en-US")} selected transaction{income.count === 1 ? "" : "s"}
@@ -2898,21 +2988,23 @@ export function Exporter() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.length === 0 ? (
+                  {activeTape.length === 0 ? (
                     <tr>
                       <td colSpan={Math.max(1, txColCount + 1)} className="px-4 py-16 text-center text-muted-foreground">
                         {phase === "loading"
                           ? "Reading pool logs…"
-                          : trades.length === 0
-                            ? "No Uniswap-style transactions were found on this pool."
-                            : "Nothing matches this filter."}
+                          : viewingBlacklist && blacklistIds.length === 0
+                            ? "Blacklist is empty. Check rows on Transactions, then click >>."
+                            : trades.length === 0
+                              ? "No Uniswap-style transactions were found on this pool."
+                              : "Nothing matches this filter."}
                       </td>
                     </tr>
                   ) : (
                     pageRows.map((trade) => (
                       <tr
                         key={trade.id}
-                        className={`hover:bg-muted/40 [&>td]:border-t [&>td]:border-border/80 ${selected.has(trade.id) ? "bg-primary/10" : ""}`}
+                        className={`hover:bg-muted/40 [&>td]:border-t [&>td]:border-border/80 ${activeSelected.has(trade.id) ? "bg-primary/10" : ""}`}
                       >
                         <td className="px-3 py-2">
                           <input
@@ -2920,7 +3012,7 @@ export function Exporter() {
                             aria-label={`Select transaction No ${trade.txNo}`}
                             title="Click to toggle. Shift+click to select a range."
                             className="size-4 cursor-pointer accent-[var(--primary)]"
-                            checked={selected.has(trade.id)}
+                            checked={activeSelected.has(trade.id)}
                             onChange={(event) => {
                               // Shift+click is handled in onClick (range select).
                               if (event.nativeEvent instanceof MouseEvent && event.nativeEvent.shiftKey) return
@@ -3094,6 +3186,37 @@ export function Exporter() {
                                   <Users className="size-4" aria-label="Team wallet" />
                                 </span>
                               ) : null}
+                              {viewingBlacklist ? (
+                                <button
+                                  type="button"
+                                  className="text-rose-300 hover:text-rose-200 disabled:cursor-not-allowed disabled:text-muted-foreground"
+                                  disabled={!blacklistSelected.has(trade.id)}
+                                  title={
+                                    blacklistSelected.has(trade.id)
+                                      ? "Remove checked rows from the blacklist"
+                                      : "Check this row, then click delete"
+                                  }
+                                  aria-label={`Remove checked transactions from the blacklist`}
+                                  onClick={() => removeCheckedFromBlacklist(trade.id)}
+                                >
+                                  <Trash2 className="size-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="rounded px-1.5 py-0.5 font-mono text-xs font-semibold text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:text-muted-foreground"
+                                  disabled={!selected.has(trade.id)}
+                                  title={
+                                    selected.has(trade.id)
+                                      ? "Add checked transactions to the blacklist"
+                                      : "Check this row, then click >>"
+                                  }
+                                  aria-label="Add checked transactions to the blacklist"
+                                  onClick={() => addCheckedToBlacklist(trade.id)}
+                                >
+                                  &gt;&gt;
+                                </button>
+                              )}
                               <a
                                 className="text-muted-foreground hover:text-foreground"
                                 href={`${pool.explorerTx}/${trade.txHash}`}
@@ -3122,7 +3245,11 @@ export function Exporter() {
             <p className="text-muted-foreground" aria-live="polite">
               Showing {firstShown.toLocaleString("en-US")}—{lastShown.toLocaleString("en-US")} of{" "}
               {listLength.toLocaleString("en-US")}
-              {tableView === "minutes" ? ` intervals (${intervalLabel})` : ""}
+              {tableView === "minutes"
+                ? ` intervals (${intervalLabel})`
+                : tableView === "blacklist"
+                  ? " blacklist"
+                  : ""}
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-muted-foreground">
@@ -3222,6 +3349,59 @@ function UsdAmount({ amount }: { amount: string | null }) {
   if (value === 0) return "$0"
   if (Math.abs(value) >= 1) return formatUsd(amount)
   return <TinyAmount value={value} prefix="$" />
+}
+
+function arrangeTape(
+  rows: Trade[],
+  picked: Set<string>,
+  opts: {
+    query: string
+    filter: SideFilter
+    funder: string
+    period: PeriodFilter | null
+    showSelectedOnly: boolean
+    showMevOnly: boolean
+    sortKey: SortKey
+    sortDesc: boolean
+  },
+): Trade[] {
+  const needle = opts.query.trim().toLowerCase()
+  const matched = rows.filter((trade) => {
+    if (opts.showSelectedOnly && !picked.has(trade.id)) return false
+    if (opts.showMevOnly && !trade.makerTags.includes("bot")) return false
+    if (opts.filter !== "ALL" && trade.type !== opts.filter) return false
+    if (opts.funder === "__none__" && trade.fundedByAddress) return false
+    if (opts.funder && opts.funder !== "__none__" && trade.fundedByAddress !== opts.funder) return false
+    if (opts.period) {
+      const time = Date.parse(trade.timestamp)
+      if (!Number.isFinite(time) || time < opts.period.startMs || time > opts.period.endMs) return false
+    }
+    if (!needle) return true
+    return (
+      trade.maker.includes(needle) ||
+      trade.txHash.includes(needle) ||
+      (trade.fundedBy ?? "").toLowerCase().includes(needle) ||
+      (trade.fundedByAddress ?? "").includes(needle)
+    )
+  })
+  const direction = opts.sortDesc ? -1 : 1
+  return [...matched].sort((a, b) => {
+    if (opts.sortKey === "selected") {
+      const diff = Number(picked.has(a.id)) - Number(picked.has(b.id))
+      return diff * direction || compareTrades(b, a, "timestamp")
+    }
+    if (opts.sortKey === "others") {
+      return (tagWeight(a) - tagWeight(b)) * direction || compareTrades(b, a, "timestamp")
+    }
+    if (opts.sortKey === "makerTxCount") {
+      const diff = a.makerTxCount - b.makerTxCount
+      return diff * direction || a.maker.localeCompare(b.maker) || compareTrades(b, a, "timestamp")
+    }
+    const missingA = isMissing(a, opts.sortKey)
+    const missingB = isMissing(b, opts.sortKey)
+    if (missingA !== missingB) return missingA ? 1 : -1
+    return compareTrades(a, b, opts.sortKey) * direction
+  })
 }
 
 function tagWeight(trade: Trade): number {

@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-02"
+export const HELP_UPDATED_AT = "2026-11-03"
 
 export type HelpExample = {
   title: string
@@ -68,6 +68,9 @@ export const HELP_SECTIONS: HelpSection[] = [
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
       "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
+      "Others includes >>. Check one or more rows, then click >> on a checked row to copy those transactions into the Blacklist tab (same columns). The list is kept on this browser for that pair.",
+      "Blacklist sits next to Deep Analysis. Each row has a trash icon: check the row, then click trash to remove every checked blacklist row. Empty blacklist clears the table immediately.",
+      "Calculate Income uses the checked rows of the table you are viewing — the full tape, or only the blacklist.",
     ],
     examples: [
       {
@@ -85,6 +88,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "High Gas Price vs gas tracker",
         body: "On Oct 26 16:12:59 EDT a GINNAN sell paid 28.562 gwei effective while the block base fee was ~0.046 gwei — the sender set a 28.562 gwei priority tip. Pair Sheet shows the receipt value; the gas tracker only plots base-fee averages.",
+      },
+      {
+        title: "Blacklist then income",
+        body: "Check the team sells, click >> on one of those rows, open Blacklist, check them again, and Calculate Income. That total is only the blacklist. Empty blacklist clears every saved row at once.",
       },
       {
         title: "Holders after a buy",
