@@ -133,6 +133,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Type chips (All / Buys / Sells / Adds / Removes / Init) and Funded by filter the view.",
       "Search matches maker, funder, or tx hash.",
       "Columns opens a checklist for Transactions or Deep Analysis — hide unused fields to reduce sideways scrolling. Choices are remembered on this browser.",
+      "The table scrolls inside its own frame, vertically and horizontally, the same way. Column headers stay pinned. Page controls stay under the frame.",
       "Timezone defaults to US Eastern (America/New_York — EST/EDT). Changing it updates table dates; CSV always includes UTC and local.",
       "Row checkboxes toggle selection (Shift+click a range). The header checkbox checks or clears only the current page. Click a No cell to toggle that row too.",
       "Show selected filters the table to checked rows only; Show all (or Clear selection) restores the full list.",

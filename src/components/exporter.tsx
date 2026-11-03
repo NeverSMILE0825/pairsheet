@@ -210,6 +210,10 @@ type MinuteSortKey =
   | "endGasFeeTotalEth"
 
 const PAGE_ATTEMPTS = 3
+/** Both axes scroll inside the table card; header cells stay pinned. */
+const TABLE_SCROLL = "max-h-[70vh] overflow-auto overscroll-contain"
+const TABLE_HEAD =
+  "sticky top-0 z-10 bg-muted text-left text-xs tracking-wide text-muted-foreground uppercase [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-muted [&_th]:border-b [&_th]:border-border/80"
 /** How often an open tape checks the chain for swaps newer than the snapshot. */
 const LIVE_POLL_MS = 12_000
 const FUNDER_BATCH = 6
@@ -2663,12 +2667,12 @@ export function Exporter() {
 
           {tableView === "minutes" ? (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm" style={{ minWidth: tableMinWidth(daColCount) }}>
+            <div className={TABLE_SCROLL}>
+              <table className="w-full border-separate border-spacing-0 text-sm" style={{ minWidth: tableMinWidth(daColCount) }}>
                 <caption className="sr-only">
                   Deep Analysis ({intervalLabel}) for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
-                <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
+                <thead className={TABLE_HEAD}>
                   <tr>
                     {showDa("no") ? <MinuteSortHeader label="No" column="no" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} align="right" /> : null}
                     {showDa("startMs") ? <MinuteSortHeader label={`Start Time (${zoneName})`} column="startMs" sortKey={minuteSortKey} desc={minuteSortDesc} onSort={toggleMinuteSort} /> : null}
@@ -2698,7 +2702,7 @@ export function Exporter() {
                     </tr>
                   ) : (
                     minutePageRows.map((row) => (
-                      <tr key={row.startMs} className="border-t border-border/80 hover:bg-muted/40">
+                      <tr key={row.startMs} className="hover:bg-muted/40 [&>td]:border-t [&>td]:border-border/80">
                         {showDa("no") ? (
                           <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
                             {row.no.toLocaleString("en-US")}
@@ -2820,14 +2824,14 @@ export function Exporter() {
           </div>
           ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm" style={{ minWidth: tableMinWidth(txColCount + 1) }}>
+            <div className={TABLE_SCROLL}>
+              <table className="w-full border-separate border-spacing-0 text-sm" style={{ minWidth: tableMinWidth(txColCount + 1) }}>
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
-                <thead className="bg-muted/70 text-left text-xs tracking-wide text-muted-foreground uppercase">
+                <thead className={TABLE_HEAD}>
                   <tr>
-                    <th className="w-10 px-3 py-2" aria-sort={sortKey === "selected" ? (sortDesc ? "descending" : "ascending") : "none"}>
+                    <th className="w-10 bg-muted px-3 py-2" aria-sort={sortKey === "selected" ? (sortDesc ? "descending" : "ascending") : "none"}>
                       <div className="flex flex-col items-center gap-1">
                         <input
                           type="checkbox"
@@ -2908,7 +2912,7 @@ export function Exporter() {
                     pageRows.map((trade) => (
                       <tr
                         key={trade.id}
-                        className={`border-t border-border/80 hover:bg-muted/40 ${selected.has(trade.id) ? "bg-primary/10" : ""}`}
+                        className={`hover:bg-muted/40 [&>td]:border-t [&>td]:border-border/80 ${selected.has(trade.id) ? "bg-primary/10" : ""}`}
                       >
                         <td className="px-3 py-2">
                           <input
