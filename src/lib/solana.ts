@@ -56,11 +56,22 @@ type SigInfo = {
 const TARGET_TRADES = 400
 const MAX_SIG_PAGES = 4
 
+/** Keep signatures at or after `sinceBlock`. `reachedOlder` means this page crossed that floor. */
+export function signaturesUntilBlock<T extends { slot: number }>(
+  rows: T[],
+  sinceBlock: number | null,
+): { keep: T[]; reachedOlder: boolean } {
+  if (!sinceBlock || sinceBlock <= 0) return { keep: rows, reachedOlder: false }
+  const keep = rows.filter((row) => row.slot >= sinceBlock)
+  return { keep, reachedOlder: keep.length !== rows.length }
+}
+
 export async function getSolanaSwapPage(
   chain: ChainConfig,
   address: string,
   dextoolsUrl: string,
   cursor: ServerCursor | null,
+  sinceBlock: number | null = null,
 ): Promise<SwapsResponse> {
   const pool = cursor?.pool ?? (await resolveSolanaPool(chain, address, dextoolsUrl))
   let before = cursor?.before ?? null
@@ -78,7 +89,8 @@ export async function getSolanaSwapPage(
       break
     }
 
-    const success = signatures.filter((row) => row.err == null)
+    const windowed = signaturesUntilBlock(signatures, sinceBlock)
+    const success = windowed.keep.filter((row) => row.err == null)
     const timestamps = success
       .map((row) => row.blockTime)
       .filter((value): value is number => typeof value === "number" && value > 0)
@@ -109,7 +121,11 @@ export async function getSolanaSwapPage(
       trades.push(applyQuotePrice(trade, pool, priceByTime))
     }
 
-    nextBefore = signatures.length >= SIG_PAGE ? signatures[signatures.length - 1]?.signature ?? null : null
+    if (windowed.reachedOlder || signatures.length < SIG_PAGE) {
+      nextBefore = null
+      break
+    }
+    nextBefore = signatures[signatures.length - 1]?.signature ?? null
     before = nextBefore
     if (!nextBefore) break
   }
@@ -125,6 +141,7 @@ export async function getSolanaSwapPage(
           queue: [],
           page: pageIndex,
           before: nextBefore,
+          sinceBlock,
           blockscoutParams: null,
           pool,
         } satisfies ServerCursor),

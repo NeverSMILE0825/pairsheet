@@ -1,6 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MAX_LOG_PAGE, ROUTESCAN_PAGE, nextLogPage } from "./history"
+import { MAX_LOG_PAGE, ROUTESCAN_PAGE, mergeNewTrades, newestTradeBlock, nextLogPage, positiveSinceBlock } from "./history"
+import { signaturesUntilBlock } from "./solana"
+import type { Trade } from "./types"
 import type { RawLog } from "./types"
 
 function logsInRange(from: number, count: number): RawLog[] {
@@ -47,4 +49,26 @@ test("nextLogPage preserves an existing fromBlock while paging inside a window",
     toBlock: null,
     blockscoutParams: null,
   })
+})
+
+test("live tail starts at the newest saved block and appends only new ids", () => {
+  const older = { id: "0xaaa-1", blockNumber: 100 } as Trade
+  const edge = { id: "0xbbb-2", blockNumber: 250 } as Trade
+  const fresh = { id: "0xccc-3", blockNumber: 251 } as Trade
+  assert.equal(newestTradeBlock([older, edge]), 250)
+  assert.equal(positiveSinceBlock(250.9), 250)
+  assert.equal(positiveSinceBlock(0), null)
+  const existing = [older, edge]
+  const merged = mergeNewTrades(existing, [edge, fresh])
+  assert.deepEqual(merged.map((trade) => trade.id), ["0xaaa-1", "0xbbb-2", "0xccc-3"])
+  assert.equal(mergeNewTrades(existing, [edge]), existing)
+  assert.equal(mergeNewTrades(existing, []), existing)
+})
+
+test("solana live window stops once signatures are older than the saved slot", () => {
+  const rows = [{ slot: 30 }, { slot: 20 }, { slot: 10 }]
+  const cut = signaturesUntilBlock(rows, 20)
+  assert.deepEqual(cut.keep, [{ slot: 30 }, { slot: 20 }])
+  assert.equal(cut.reachedOlder, true)
+  assert.equal(signaturesUntilBlock(rows, null).reachedOlder, false)
 })

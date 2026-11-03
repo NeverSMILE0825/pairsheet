@@ -34,6 +34,40 @@ export const MAX_LOG_PAGE = 10
 export type SwapPageOptions = {
   /** When false, skip receipt fetches used for Gas Price / Gas Fee Total (faster loads). Default true. */
   includeGas?: boolean
+  /**
+   * Live tail. Only logs at or after this block are returned, and later topics
+   * keep the same floor so a saved tape can catch up without rereading history.
+   */
+  sinceBlock?: number | null
+}
+
+export function positiveSinceBlock(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null
+  const block = Math.floor(value)
+  return block > 0 ? block : null
+}
+
+/** Newest loaded block, inclusive start for a live tail (same-block rows are deduped). */
+export function newestTradeBlock(trades: { blockNumber: number }[]): number | null {
+  let newest = 0
+  for (const trade of trades) {
+    if (trade.blockNumber > newest) newest = trade.blockNumber
+  }
+  return newest > 0 ? newest : null
+}
+
+/** Append trades whose ids are not already on the tape. Same array when nothing is new. */
+export function mergeNewTrades(existing: Trade[], incoming: Trade[]): Trade[] {
+  if (incoming.length === 0) return existing
+  const seen = new Set(existing.map((trade) => trade.id))
+  const extra: Trade[] = []
+  for (const trade of incoming) {
+    if (!trade.id || seen.has(trade.id)) continue
+    seen.add(trade.id)
+    extra.push(trade)
+  }
+  if (extra.length === 0) return existing
+  return [...existing, ...extra]
 }
 
 export async function getSwapPage(
@@ -59,9 +93,10 @@ export async function getSwapPage(
   if (cursor && cursor.pool.address !== parsed.address) {
     throw new AppError("The continuation token does not match this pair.", 400)
   }
+  const sinceBlock = positiveSinceBlock(cursor?.sinceBlock ?? options.sinceBlock)
 
   if (parsed.chain.id === "solana") {
-    return getSolanaSwapPage(parsed.chain, parsed.address, parsed.url, cursor)
+    return getSolanaSwapPage(parsed.chain, parsed.address, parsed.url, cursor, sinceBlock)
   }
 
   const pool = cursor?.pool ?? (await resolvePool(parsed.chain, parsed.address, parsed.url))
@@ -70,16 +105,18 @@ export async function getSwapPage(
   const tried = new Set(cursor?.triedTopics ?? [topic])
 
   const chain = parsed.chain
-  const page = await readPage(parsed.chain, pool, topic, cursor)
-  let trades = await hydrate(parsed.chain, pool, page.logs, includeGas)
-  let next = page.next
+  const page = await readPage(parsed.chain, pool, topic, cursor, sinceBlock)
+  const clipped = clipLogsToSince(page.logs, page.next, sinceBlock)
+  let trades = await hydrate(parsed.chain, pool, clipped.logs, includeGas)
+  let next = clipped.next
   let activeTopic = topic
 
   if (trades.length === 0 && !next && !cursor) {
     for (const alternate of topics) {
       if (tried.has(alternate)) continue
       tried.add(alternate)
-      const retry = await readPage(parsed.chain, pool, alternate, null)
+      const retryPage = await readPage(parsed.chain, pool, alternate, null, sinceBlock)
+      const retry = clipLogsToSince(retryPage.logs, retryPage.next, sinceBlock)
       if (retry.logs.length > 0 || retry.next) {
         trades = await hydrate(parsed.chain, pool, retry.logs, includeGas)
         next = retry.next
@@ -99,7 +136,7 @@ export async function getSwapPage(
     following = {
       source: chain.routescan ? ("routescan" as const) : ("blockscout" as const),
       page: 1,
-      fromBlock: null,
+      fromBlock: sinceBlock,
       toBlock: null,
       blockscoutParams: null,
     }
@@ -114,6 +151,7 @@ export async function getSwapPage(
         page: following.page,
         fromBlock: following.fromBlock ?? null,
         toBlock: following.toBlock ?? null,
+        sinceBlock,
         blockscoutParams: following.blockscoutParams,
         pool,
       })
@@ -166,14 +204,28 @@ type PageResult = {
   } | null
 }
 
+function clipLogsToSince(
+  logs: RawLog[],
+  next: PageResult["next"],
+  sinceBlock: number | null,
+): { logs: RawLog[]; next: PageResult["next"] } {
+  if (!sinceBlock) return { logs, next }
+  const older = logs.some((log) => log.blockNumber > 0 && log.blockNumber < sinceBlock)
+  const kept = logs.filter((log) => log.blockNumber >= sinceBlock)
+  // Blockscout pages are newest-first. Once a page crosses the floor, stop
+  // instead of walking the rest of the pair's history.
+  return { logs: kept, next: older ? null : next }
+}
+
 async function readPage(
   chain: ChainConfig,
   pool: PoolContext,
   topic: string,
   cursor: ServerCursor | null,
+  sinceBlock: number | null = null,
 ): Promise<PageResult> {
   const source = cursor?.source ?? (chain.routescan ? "routescan" : "blockscout")
-  const fromBlock = cursor?.fromBlock ?? null
+  const fromBlock = positiveSinceBlock(cursor?.fromBlock) ?? sinceBlock
   const toBlock = cursor?.toBlock ?? null
   if (source === "routescan") {
     return readRoutescan(chain, pool, topic, cursor?.page ?? 1, fromBlock, toBlock)

@@ -28,11 +28,16 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Busy pools past ~10k events keep loading: explorer getLogs caps each window at 10k, so Pair Sheet advances fromBlock and continues until the tape is complete (progress shows “Still reading the chain…”).",
       "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
       "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
+      "Once a tape is open, Pair Sheet keeps watching the chain (about every 12 seconds) and appends swaps newer than the newest row. A saved snapshot catches up by itself — you do not press Load swaps again. The Transactions card shows Live, or Updating… while it is reading. If this browser already saved the pair, the longer tape is written back locally.",
     ],
     examples: [
       {
         title: "Example URL",
         body: "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
+      },
+      {
+        title: "Saved tape on an active pair",
+        body: "GTA6 saved at 14,045 txs while DEXTools now shows 16.31K. Open the snapshot: the count climbs toward the chain total on its own, and the local save is updated. Load swaps is only needed for a first-time read or a full reload.",
       },
       {
         title: "Pools with 10k+ trades",

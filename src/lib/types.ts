@@ -104,6 +104,8 @@ export type ServerCursor = {
   /** Inclusive lower block for the current getLogs window (Routescan/Etherscan are oldest-first). */
   fromBlock?: number | null
   toBlock?: number | null
+  /** Live tail: never walk logs older than this block. Preserved when the topic changes. */
+  sinceBlock?: number | null
   before?: string | null
   blockscoutParams: Record<string, string> | null
   pool: PoolContext

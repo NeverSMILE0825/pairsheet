@@ -32,7 +32,7 @@ import {
 } from "@/lib/table-columns"
 import { resolveFunders } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
-import { getSwapPage } from "@/lib/history"
+import { getSwapPage, mergeNewTrades, newestTradeBlock } from "@/lib/history"
 import { AppError } from "@/lib/http"
 import { isPoolId, marketCapsDrift, repriceMarketCaps, resolveTokenTotalSupply, suppliesDiffer } from "@/lib/pool"
 import { finalizeV4Tape } from "@/lib/v4-tape"
@@ -210,6 +210,8 @@ type MinuteSortKey =
   | "endGasFeeTotalEth"
 
 const PAGE_ATTEMPTS = 3
+/** How often an open tape checks the chain for swaps newer than the snapshot. */
+const LIVE_POLL_MS = 12_000
 const FUNDER_BATCH = 6
 const FUNDER_PARALLEL = 2
 const FUNDER_PASSES = 4
@@ -236,6 +238,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 export function Exporter() {
   const [url, setUrl] = useState("")
   const [phase, setPhase] = useState<Phase>("idle")
+  const [liveMode, setLiveMode] = useState<"off" | "updating" | "live">("off")
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [pool, setPool] = useState<PoolView | null>(null)
@@ -281,6 +284,18 @@ export function Exporter() {
   const [gasBusy, setGasBusy] = useState(false)
   const [confirmExtra, setConfirmExtra] = useState<ExtraLookup | null>(null)
   const run = useRef(0)
+  const tradesRef = useRef<Trade[]>([])
+  const liveApi = useRef({
+    url: "",
+    pool: null as PoolView | null,
+    lookupGas: false,
+    lookupHolders: false,
+    facts: EMPTY_FACTS,
+    warning: null as string | null,
+    capped: false,
+    lookUpHolders: (_chainId: string, _view: PoolView, _loaded: Trade[], _token: number) =>
+      Promise.resolve(),
+  })
   const selectionAnchor = useRef<number | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [income, setIncome] = useState<Income | null>(null)
@@ -337,6 +352,87 @@ export function Exporter() {
   useEffect(() => {
     if (showSelectedOnly && selected.size === 0) setShowSelectedOnly(false)
   }, [showSelectedOnly, selected])
+
+  tradesRef.current = rawTrades
+  liveApi.current = {
+    url,
+    pool,
+    lookupGas,
+    lookupHolders,
+    facts,
+    warning,
+    capped,
+    lookUpHolders,
+  }
+
+  useEffect(() => {
+    if (phase !== "done" || !pool || rawTrades.length === 0 || !url.trim()) {
+      setLiveMode("off")
+      return
+    }
+    let stopped = false
+    let timer = 0
+    const watchUrl = url.trim()
+    const watchAddress = pool.address
+
+    async function tick() {
+      if (stopped) return
+      const api = liveApi.current
+      if (!api.pool || api.pool.address !== watchAddress || api.url.trim() !== watchUrl) return
+      const since = newestTradeBlock(tradesRef.current)
+      if (!since) return
+      setLiveMode("updating")
+      let cursor: string | null = null
+      let added = 0
+      const wantGas = api.lookupGas || tradesRef.current.some((trade) => trade.gasPriceGwei)
+      try {
+        do {
+          if (stopped) return
+          const body = await getSwapPage(watchUrl, cursor, {
+            includeGas: wantGas,
+            sinceBlock: cursor ? null : since,
+          })
+          if (stopped) return
+          if (body.trades.length > 0) {
+            setTrades((current) => {
+              if (current.length >= MAX_TRADES) return current
+              const merged = mergeNewTrades(current, body.trades)
+              if (merged === current) return current
+              const room = merged.length > MAX_TRADES ? merged.slice(0, MAX_TRADES) : merged
+              added += room.length - current.length
+              const polished = polishTape(api.pool!, room)
+              tradesRef.current = polished
+              return polished
+            })
+          }
+          cursor = body.nextCursor
+          if (tradesRef.current.length >= MAX_TRADES) {
+            setCapped(true)
+            cursor = null
+          }
+        } while (cursor)
+        if (stopped) return
+        if (added > 0 && api.pool) {
+          const snapshot = tradesRef.current
+          const hadHolders = api.lookupHolders || snapshot.some((trade) => trade.holders != null)
+          if (hadHolders) void api.lookUpHolders(api.pool.chainId, api.pool, snapshot, run.current)
+          void persistCaughtUpTape(api.pool, snapshot, api).then(() => refreshSavedList().catch(() => undefined))
+        }
+        if (!stopped) setLiveMode("live")
+      } catch {
+        if (!stopped) setLiveMode("live")
+      }
+      if (!stopped) timer = window.setTimeout(() => void tick(), LIVE_POLL_MS)
+    }
+
+    void tick()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+    // lookUpHolders is a stable function declaration; liveApi is read inside the tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, pool, url])
 
   function persistLookupFlag(key: string, next: boolean) {
     try {
@@ -2106,7 +2202,11 @@ export function Exporter() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <Stat label="Transactions" value={stats.count.toLocaleString("en-US")} />
+            <Stat
+              label="Transactions"
+              value={stats.count.toLocaleString("en-US")}
+              hint={liveMode === "updating" ? "Updating…" : liveMode === "live" ? "Live" : undefined}
+            />
             <Stat label="Buys" value={stats.buys.toLocaleString("en-US")} tone="buy" />
             <Stat label="Sells" value={stats.sells.toLocaleString("en-US")} tone="sell" />
             <Stat label="Add / Remove" value={`${stats.adds.toLocaleString("en-US")} / ${stats.removes.toLocaleString("en-US")}`} />
@@ -3261,14 +3361,55 @@ function MinuteSortHeader({
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "buy" | "sell" }) {
+function Stat({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string
+  value: string
+  tone?: "buy" | "sell"
+  hint?: string
+}) {
   const color = tone === "buy" ? "text-emerald-400" : tone === "sell" ? "text-rose-400" : "text-foreground"
   return (
     <div className="rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
       <p className="text-xs tracking-wide text-muted-foreground uppercase">{label}</p>
       <p className={`mt-1 font-mono text-xl ${color}`}>{value}</p>
+      {hint ? (
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-emerald-400">
+          <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
+          {hint}
+        </p>
+      ) : null}
     </div>
   )
+}
+
+/** Keep an existing local snapshot current after the live tail appends swaps. */
+async function persistCaughtUpTape(
+  pool: PoolView,
+  trades: Trade[],
+  api: { facts: WalletFacts; warning: string | null; capped: boolean },
+) {
+  try {
+    const existing = await loadSavedAnalysis(analysisId(pool))
+    if (!existing) return
+    await saveAnalysis({
+      url: existing.url,
+      pool: {
+        ...existing.pool,
+        baseTotalSupply: pool.baseTotalSupply ?? existing.pool.baseTotalSupply,
+      },
+      trades,
+      facts: api.facts,
+      warning: existing.warning,
+      capped: existing.capped,
+    })
+  } catch {
+    return
+  }
 }
 
 function Step({ n, title, body }: { n: string; title: string; body: string }) {
