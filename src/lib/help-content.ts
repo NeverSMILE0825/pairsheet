@@ -68,8 +68,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
       "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
-      "Others includes >>. Check one or more rows, then click >> on a checked row to copy those transactions into the Blacklist tab (same columns). The list is kept on this browser for that pair.",
-      "Blacklist sits next to Deep Analysis. Each row has a trash icon: check the row, then click trash to remove every checked blacklist row. Empty blacklist clears the table immediately.",
+      "Others includes >>. Click >> on a row to copy that transaction into the Blacklist tab (same columns). No checkbox is required. The list is kept on this browser for that pair.",
+      "Blacklist sits next to Deep Analysis. Each row has a trash icon that removes that row immediately, with no checkbox. Empty blacklist clears the table immediately.",
       "Calculate Income uses the checked rows of the table you are viewing — the full tape, or only the blacklist.",
     ],
     examples: [
@@ -91,7 +91,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         title: "Blacklist then income",
-        body: "Check the team sells, click >> on one of those rows, open Blacklist, check them again, and Calculate Income. That total is only the blacklist. Empty blacklist clears every saved row at once.",
+        body: "Click >> on each team sell (no need to check the row first), open Blacklist, check those rows, and Calculate Income. That total is only the blacklist. The trash icon drops one row. Empty blacklist clears every saved row at once.",
       },
       {
         title: "Holders after a buy",

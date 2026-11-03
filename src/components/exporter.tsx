@@ -1093,35 +1093,28 @@ export function Exporter() {
     setIncome(null)
   }
 
-  function addCheckedToBlacklist(triggerId: string) {
-    if (!selected.has(triggerId)) return
-    const incoming = trades.filter((trade) => selected.has(trade.id)).map((trade) => trade.id)
-    const next = addBlacklistIds(blacklistIds, incoming)
-    const added = next.length - blacklistIds.length
-    if (added === 0) {
-      flashNotice("Those checked transactions are already in the blacklist.", "info")
+  function addTradeToBlacklist(tradeId: string) {
+    const next = addBlacklistIds(blacklistIds, [tradeId])
+    if (next === blacklistIds) {
+      flashNotice("That transaction is already in the blacklist.", "info")
       return
     }
     setBlacklistIds(next)
-    flashNotice(
-      `Added ${added.toLocaleString("en-US")} transaction${added === 1 ? "" : "s"} to the blacklist.`,
-      "ok",
-    )
+    flashNotice("Added 1 transaction to the blacklist.", "ok")
   }
 
-  function removeCheckedFromBlacklist(triggerId: string) {
-    if (!blacklistSelected.has(triggerId)) return
-    const next = removeBlacklistIds(blacklistIds, blacklistSelected)
-    const removed = blacklistIds.length - next.length
+  function removeTradeFromBlacklist(tradeId: string) {
+    const next = removeBlacklistIds(blacklistIds, new Set([tradeId]))
+    if (next === blacklistIds) return
     setBlacklistIds(next)
-    setBlacklistSelected(new Set())
+    setBlacklistSelected((current) => {
+      if (!current.has(tradeId)) return current
+      const draft = new Set(current)
+      draft.delete(tradeId)
+      return draft
+    })
     setIncome(null)
-    if (removed > 0) {
-      flashNotice(
-        `Removed ${removed.toLocaleString("en-US")} transaction${removed === 1 ? "" : "s"} from the blacklist.`,
-        "ok",
-      )
-    }
+    flashNotice("Removed 1 transaction from the blacklist.", "ok")
   }
 
   function emptyBlacklist() {
@@ -2558,8 +2551,8 @@ export function Exporter() {
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 {activeSelected.size === 0
                   ? tableView === "blacklist"
-                    ? "Tick blacklist rows, then calculate. Trash removes the checked rows."
-                    : "Tick rows, then >> in Others to blacklist them. Shift+click selects a range."
+                    ? "Tick blacklist rows, then calculate. Trash removes that row."
+                    : "Tick rows to calculate income. >> in Others blacklists that row. Shift+click selects a range."
                   : `${activeSelected.size.toLocaleString("en-US")} transaction${activeSelected.size === 1 ? "" : "s"} selected`}
               </p>
               {activeTape.length > pageRows.length && !allMatchingSelected ? (
@@ -2994,7 +2987,7 @@ export function Exporter() {
                         {phase === "loading"
                           ? "Reading pool logs…"
                           : viewingBlacklist && blacklistIds.length === 0
-                            ? "Blacklist is empty. Check rows on Transactions, then click >>."
+                            ? "Blacklist is empty. On Transactions, click >> on a row."
                             : trades.length === 0
                               ? "No Uniswap-style transactions were found on this pool."
                               : "Nothing matches this filter."}
@@ -3189,30 +3182,20 @@ export function Exporter() {
                               {viewingBlacklist ? (
                                 <button
                                   type="button"
-                                  className="text-rose-300 hover:text-rose-200 disabled:cursor-not-allowed disabled:text-muted-foreground"
-                                  disabled={!blacklistSelected.has(trade.id)}
-                                  title={
-                                    blacklistSelected.has(trade.id)
-                                      ? "Remove checked rows from the blacklist"
-                                      : "Check this row, then click delete"
-                                  }
-                                  aria-label={`Remove checked transactions from the blacklist`}
-                                  onClick={() => removeCheckedFromBlacklist(trade.id)}
+                                  className="text-rose-300 hover:text-rose-200"
+                                  title="Remove this transaction from the blacklist"
+                                  aria-label="Remove this transaction from the blacklist"
+                                  onClick={() => removeTradeFromBlacklist(trade.id)}
                                 >
                                   <Trash2 className="size-4" />
                                 </button>
                               ) : (
                                 <button
                                   type="button"
-                                  className="rounded px-1.5 py-0.5 font-mono text-xs font-semibold text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:text-muted-foreground"
-                                  disabled={!selected.has(trade.id)}
-                                  title={
-                                    selected.has(trade.id)
-                                      ? "Add checked transactions to the blacklist"
-                                      : "Check this row, then click >>"
-                                  }
-                                  aria-label="Add checked transactions to the blacklist"
-                                  onClick={() => addCheckedToBlacklist(trade.id)}
+                                  className="rounded px-1.5 py-0.5 font-mono text-xs font-semibold text-primary hover:bg-primary/15"
+                                  title="Add this transaction to the blacklist"
+                                  aria-label="Add this transaction to the blacklist"
+                                  onClick={() => addTradeToBlacklist(trade.id)}
                                 >
                                   &gt;&gt;
                                 </button>
