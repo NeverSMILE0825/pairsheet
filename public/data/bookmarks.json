@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-04T13:01:07.429Z",
+  "updatedAt": "2026-11-04T13:01:14.530Z",
   "bookmarks": [
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
@@ -104,7 +104,7 @@
       "baseSymbol": "ETH",
       "quoteSymbol": "WETH",
       "tradeCount": 650,
-      "starred": true
+      "starred": false
     }
   ]
 }
