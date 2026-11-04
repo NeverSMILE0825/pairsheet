@@ -88,22 +88,22 @@ test("builds inclusive empty minutes from launch through the last trade", () => 
     ],
     "UTC",
   )
-  assert.equal(rows.length, 10) // 16:20 .. 16:29 inclusive
+  assert.equal(rows.length, 9) // 16:20:59, then one minute apart, through 16:28:59
   assert.equal(rows[0].buyCount, 0)
   assert.equal(rows[0].sellCount, 0)
-  assert.equal(formatMinuteLabel(rows[0].start), "Oct 26 26 16:20")
-  assert.equal(formatMinuteLabel(rows[0].end), "Oct 26 26 16:21")
-  assert.equal(rows[5].buyCount, 1) // 16:25
-  assert.equal(rows[5].avgBuySpeedSec, 60)
-  assert.equal(rows[5].avgBuyQuote, "0.100")
-  assert.equal(rows[6].buyCount, 2) // 16:26
-  assert.equal(rows[6].avgBuySpeedSec, 30)
-  assert.equal(rows[6].avgBuyQuote, "0.030")
-  assert.equal(rows[9].sellCount, 2)
-  assert.equal(rows[9].avgSellSpeedSec, 30)
-  assert.equal(rows[9].avgSellQuote, "0.060")
+  assert.equal(formatMinuteLabel(rows[0].start), "Oct 26 26 16:20:59")
+  assert.equal(formatMinuteLabel(rows[0].end), "Oct 26 26 16:21:59")
+  assert.equal(rows[4].buyCount, 1) // 16:25:35
+  assert.equal(rows[4].avgBuySpeedSec, 60)
+  assert.equal(rows[4].avgBuyQuote, "0.100")
+  assert.equal(rows[5].buyCount, 2) // 16:26
+  assert.equal(rows[5].avgBuySpeedSec, 30)
+  assert.equal(rows[5].avgBuyQuote, "0.030")
+  assert.equal(rows[8].sellCount, 2)
+  assert.equal(rows[8].avgSellSpeedSec, 30)
+  assert.equal(rows[8].avgSellQuote, "0.060")
   assert.equal(formatSpeed(rows[0].avgBuySpeedSec, rows[0].buyCount, rows[0].avgBuyQuote), "—")
-  assert.equal(formatSpeed(rows[6].avgBuySpeedSec, rows[6].buyCount, rows[6].avgBuyQuote), "30s (0.030)")
+  assert.equal(formatSpeed(rows[5].avgBuySpeedSec, rows[5].buyCount, rows[5].avgBuyQuote), "30s (0.030)")
 })
 
 test("builds 12-second buckets when requested", () => {
@@ -116,10 +116,10 @@ test("builds 12-second buckets when requested", () => {
     "UTC",
     12_000,
   )
-  assert.equal(rows.length, 3) // 16:20:00, :12, :24
+  assert.equal(rows.length, 3) // 16:20:01, :13, :25
   assert.equal(rows[0].buyCount, 2)
   assert.equal(rows[0].avgBuySpeedSec, 6)
-  assert.equal(formatBucketLabel(rows[0].start, 12_000), "Oct 26 26 16:20:00")
+  assert.equal(formatBucketLabel(rows[0].start, 12_000), "Oct 26 26 16:20:01")
   assert.equal(estimateBucketCount(
     [
       trade({ type: "BUY", timestamp: "2026-10-26T16:20:01.000Z", id: "b1" }),
@@ -127,6 +127,22 @@ test("builds 12-second buckets when requested", () => {
     ],
     12_000,
   ), 3)
+})
+
+test("1h buckets start at the pool init time", () => {
+  const rows = buildIntervalTape(
+    [
+      trade({ type: "INIT", timestamp: "2026-11-03T20:23:41.000Z", id: "i" }),
+      trade({ type: "BUY", timestamp: "2026-11-03T21:40:00.000Z", id: "b1" }),
+    ],
+    "UTC",
+    3_600_000,
+  )
+  assert.equal(rows.length, 2)
+  assert.equal(formatBucketLabel(rows[0].start, 3_600_000), "Nov 3 26 20:23:41")
+  assert.equal(formatBucketLabel(rows[0].end, 3_600_000), "Nov 3 26 21:23:41")
+  assert.equal(formatBucketLabel(rows[1].start, 3_600_000), "Nov 3 26 21:23:41")
+  assert.equal(rows[1].buyCount, 1)
 })
 
 test("carries start/end pool quote, mcap, and price across minutes", () => {

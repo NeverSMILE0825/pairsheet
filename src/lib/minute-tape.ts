@@ -81,11 +81,32 @@ export function formatIntervalMs(ms: number): string {
   return `${ms}ms`
 }
 
-/** Floor an ISO timestamp to the start of its interval bucket (UTC-aligned). */
-export function floorToIntervalMs(iso: string, intervalMs: number): number | null {
+/**
+ * Pool Init time, or the earliest trade when the tape has no Init.
+ * Deep Analysis buckets are measured from this instant for every interval.
+ */
+export function intervalOriginMs(trades: Array<{ type: string; timestamp: string }>): number | null {
+  let initMs: number | null = null
+  let earliest = Number.POSITIVE_INFINITY
+  for (const trade of trades) {
+    const time = Date.parse(trade.timestamp)
+    if (!Number.isFinite(time)) continue
+    if (time < earliest) earliest = time
+    if (trade.type === "INIT" && (initMs === null || time < initMs)) initMs = time
+  }
+  if (initMs !== null) return initMs
+  return Number.isFinite(earliest) ? earliest : null
+}
+
+/** Floor an ISO timestamp onto the interval grid that starts at `originMs`. */
+export function floorToIntervalMs(iso: string, intervalMs: number, originMs?: number): number | null {
   const time = Date.parse(iso)
   if (!Number.isFinite(time) || intervalMs <= 0) return null
-  return Math.floor(time / intervalMs) * intervalMs
+  if (originMs === undefined || !Number.isFinite(originMs)) {
+    return Math.floor(time / intervalMs) * intervalMs
+  }
+  if (time <= originMs) return originMs
+  return originMs + Math.floor((time - originMs) / intervalMs) * intervalMs
 }
 
 /** @deprecated Prefer floorToIntervalMs — kept for older call sites/tests. */
@@ -174,10 +195,11 @@ function compareChrono(a: Trade, b: Trade): number {
 }
 
 export function estimateBucketCount(trades: Trade[], intervalMs: number): number {
+  const origin = intervalOriginMs(trades)
   let earliest = Number.POSITIVE_INFINITY
   let latest = Number.NEGATIVE_INFINITY
   for (const trade of trades) {
-    const bucket = floorToIntervalMs(trade.timestamp, intervalMs)
+    const bucket = floorToIntervalMs(trade.timestamp, intervalMs, origin ?? undefined)
     if (bucket === null) continue
     if (bucket < earliest) earliest = bucket
     if (bucket > latest) latest = bucket
@@ -187,11 +209,12 @@ export function estimateBucketCount(trades: Trade[], intervalMs: number): number
 }
 
 /**
- * One row per interval bucket from the earliest trade through the latest
+ * One row per interval from the pool Init time through the latest trade
  * (inclusive empty buckets). Only BUY/SELL count toward the tallies.
  */
 export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DEFAULT_INTERVAL_MS): MinuteRow[] {
   if (intervalMs < 1_000) return []
+  const origin = intervalOriginMs(trades)
   let earliest = Number.POSITIVE_INFINITY
   let latest = Number.NEGATIVE_INFINITY
   const buys = new Map<number, number>()
@@ -201,7 +224,7 @@ export function buildIntervalTape(trades: Trade[], zone: string, intervalMs = DE
   const byBucket = new Map<number, Trade[]>()
 
   for (const trade of trades) {
-    const bucket = floorToIntervalMs(trade.timestamp, intervalMs)
+    const bucket = floorToIntervalMs(trade.timestamp, intervalMs, origin ?? undefined)
     if (bucket === null) continue
     if (bucket < earliest) earliest = bucket
     if (bucket > latest) latest = bucket

@@ -121,6 +121,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: "Group the tape into time buckets (12s → 1 day) for counts, pool, holders, and gas.",
     bullets: [
       "Table view → Deep Analysis: Buy/Sell counts and average speeds per bucket, shown as 20s (0.031) — seconds between trades and mean quote size (3 decimals) from the same amounts as the Transactions table.",
+      "The first bucket starts at the pool Init time for every interval (12s, 1min, 1h, 1d, or custom). Each following row begins one interval later. A tape with no Init row starts at the earliest trade.",
       "Start / End pool quote, mcap, price, and holders show how the bucket opened and closed.",
       "Gas Price / Gas Fee Total are the effective gwei and cumulative ETH spend at the end of each bucket.",
       "Chart Y-axis includes Gas Price and Gas Fee Total, plus Buy+Sell, pool, mcap, price, and holders.",
@@ -128,7 +129,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     examples: [
       {
         title: "12-second buckets",
-        body: "Set interval to 12 seconds to match a fast DEXTools tape. Empty buckets between the first and last trade stay in the list so gaps are visible.",
+        body: "Init at 20:23:41 and interval 1h: the first row is 20:23:41–21:23:41, then 21:23:41–22:23:41. It does not snap back to 20:00. The same anchor is used for 12s, 1min, and 1d. Empty buckets between the first and last trade stay in the list.",
       },
       {
         title: "Average Buy Speed 20s (0.031)",
