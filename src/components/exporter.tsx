@@ -60,6 +60,13 @@ import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trad
 import { IntervalChartDialog } from "@/components/interval-chart"
 import { LiveMarketWidgets } from "@/components/live-market"
 import {
+  LAUNCH_PRESETS,
+  describeLaunchWindow,
+  hoursToMs,
+  launchWindowMs,
+  parseLaunchHours,
+} from "@/lib/launch-window"
+import {
   DEFAULT_INTERVAL_MS,
   INTERVAL_PRESETS,
   MAX_INTERVAL_BUCKETS,
@@ -69,6 +76,7 @@ import {
   formatIntervalMs,
   formatSpeed,
   formatSpeedTitle,
+  intervalOriginMs,
   intervalToMs,
   type IntervalUnit,
   type MinuteRow,
@@ -331,6 +339,8 @@ export function Exporter() {
   const [endAt, setEndAt] = useState<DateTimeParts | null>(null)
   const [period, setPeriod] = useState<PeriodFilter | null>(null)
   const [periodError, setPeriodError] = useState<string | null>(null)
+  const [launchFrom, setLaunchFrom] = useState("")
+  const [launchTo, setLaunchTo] = useState("")
   const [fromNo, setFromNo] = useState("")
   const [toNo, setToNo] = useState("")
   const [noError, setNoError] = useState<string | null>(null)
@@ -775,6 +785,8 @@ export function Exporter() {
     setEndAt(null)
     setPeriod(null)
     setPeriodError(null)
+    setLaunchFrom("")
+    setLaunchTo("")
     setFromNo("")
     setToNo("")
     setNoError(null)
@@ -941,6 +953,10 @@ export function Exporter() {
       yearMax: Math.max(start.year, end.year),
     }
   }, [trades, zone])
+
+  const launchOrigin = useMemo(() => intervalOriginMs(trades), [trades])
+  const launchLabel =
+    launchOrigin !== null && period ? describeLaunchWindow(launchOrigin, period.startMs, period.endMs) : null
 
   const tapeQuery = useMemo(
     () => ({
@@ -1244,6 +1260,17 @@ export function Exporter() {
     })
   }
 
+  function applyPeriod(startMs: number, endMs: number) {
+    const lo = Math.min(startMs, endMs)
+    const hi = Math.max(startMs, endMs)
+    setStartAt(dateToParts(new Date(lo), zone))
+    setEndAt(dateToParts(new Date(hi), zone))
+    setPeriodError(null)
+    setPeriod({ startMs: lo, endMs: hi })
+    selectionAnchor.current = null
+    setPage(0)
+  }
+
   function extractPeriod() {
     if (!startAt || !endAt) {
       setPeriodError("Pick a start time and an end time.")
@@ -1265,6 +1292,34 @@ export function Exporter() {
     setPeriod({ startMs, endMs })
     selectionAnchor.current = null
     setPage(0)
+  }
+
+  function extractLaunchOffset(startOffsetMs: number, endOffsetMs: number) {
+    const origin = intervalOriginMs(trades)
+    if (origin === null) {
+      setPeriodError("This tape has no start time.")
+      return
+    }
+    const window = launchWindowMs(origin, startOffsetMs, endOffsetMs)
+    applyPeriod(window.startMs, window.endMs)
+  }
+
+  function extractCustomLaunch() {
+    const start = parseLaunchHours(launchFrom)
+    const end = parseLaunchHours(launchTo)
+    if (start === null || end === null) {
+      setPeriodError("Enter start and end hours from the pool start, for example 2 and 5.")
+      return
+    }
+    if (start === end) {
+      setPeriodError("End hour must be different from the start hour.")
+      return
+    }
+    if (end < start) {
+      setLaunchFrom(String(end))
+      setLaunchTo(String(start))
+    }
+    extractLaunchOffset(hoursToMs(start), hoursToMs(end))
   }
 
   function clearPeriod() {
@@ -2790,6 +2845,85 @@ export function Exporter() {
                   : `Show selected${activeSelected.size > 0 ? ` · ${activeSelected.size.toLocaleString("en-US")}` : ""}`}
               </Button>
               <div className="ml-auto flex flex-wrap items-center gap-2">
+                <div
+                  className="flex flex-wrap items-center gap-1 rounded-xl bg-muted/50 px-2 py-1.5 ring-1 ring-foreground/10"
+                  role="group"
+                  aria-label="Extract from pool start"
+                >
+                  <span className="px-1 text-xs text-muted-foreground">First</span>
+                  {LAUNCH_PRESETS.map((preset) => {
+                    const active =
+                      launchOrigin !== null &&
+                      period?.startMs === launchOrigin &&
+                      period.endMs === launchOrigin + preset.ms
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        aria-pressed={active}
+                        disabled={trades.length === 0}
+                        title={`Transactions from pool start through the first ${preset.label}`}
+                        className={`rounded-md px-2 py-1 text-xs font-medium disabled:opacity-40 ${
+                          active ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => extractLaunchOffset(0, preset.ms)}
+                      >
+                        {preset.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-muted/50 px-2.5 py-1.5 ring-1 ring-foreground/10">
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    Start
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label="Start hour from pool start"
+                      value={launchFrom}
+                      onChange={(event) => {
+                        setLaunchFrom(event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))
+                        setPeriodError(null)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") extractCustomLaunch()
+                      }}
+                      placeholder="2"
+                      className="h-8 w-14 rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground"
+                    />
+                    h
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    End
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label="End hour from pool start"
+                      value={launchTo}
+                      onChange={(event) => {
+                        setLaunchTo(event.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1"))
+                        setPeriodError(null)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") extractCustomLaunch()
+                      }}
+                      placeholder="5"
+                      className="h-8 w-14 rounded-lg border border-input bg-background px-2 font-mono text-sm text-foreground"
+                    />
+                    h
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={extractCustomLaunch}
+                    disabled={trades.length === 0}
+                    title="Keep transactions from the start hour through the end hour after pool start. 2 and 5 keeps hour 2 through hour 5."
+                  >
+                    Extract
+                  </Button>
+                </div>
                 <DateTimeField
                   label="Start time"
                   value={startAt}
@@ -2845,6 +2979,7 @@ export function Exporter() {
             {period ? (
               <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                 <span>
+                  {launchLabel ? <span className="text-foreground">{launchLabel}. </span> : null}
                   Showing {filtered.length.toLocaleString("en-US")} transaction{filtered.length === 1 ? "" : "s"} from{" "}
                   <span className="font-mono text-foreground">{formatParts(dateToParts(new Date(period.startMs), zone))}</span>
                   {" — "}

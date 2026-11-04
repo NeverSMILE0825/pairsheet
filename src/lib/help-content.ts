@@ -149,6 +149,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Timezone defaults to US Eastern (America/New_York — EST/EDT). Changing it updates table dates; CSV always includes UTC and local.",
       "Row checkboxes toggle selection (Shift+click a range). The header checkbox checks or clears only the current page. Click a No cell to toggle that row too.",
       "Show selected filters the table to checked rows only; Show all (or Clear selection) restores the full list.",
+      "First 5min, 15min, 1h, 2h, 3h, 6h, 12h, and 24h keep only rows from the pool Init through that much time. A tape with no Init uses the earliest trade. Custom Start and End are hours from that same instant: 2 and 5 keeps rows from 2 hours after the start through 5 hours after the start. Clear period restores the full tape. Start time / End time still pick an exact clock range.",
     ],
     examples: [
       {
@@ -158,6 +159,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Review a few ticks",
         body: "Check several rows → Show selected → Calculate Income on just those. Clear selection when you are done.",
+      },
+      {
+        title: "First hours after launch",
+        body: "Click 1h to keep rows from Init through one hour later. Start 2 and End 5, then Extract, keeps rows from 2 hours after Init through 5 hours after Init — not the 2nd through 5th clock hour of the day.",
       },
     ],
   },
