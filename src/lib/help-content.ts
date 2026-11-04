@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-03"
+export const HELP_UPDATED_AT = "2026-11-04"
 
 export type HelpExample = {
   title: string
@@ -67,7 +67,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
-      "Funded by is the address that first sent native currency into the maker (only filled when “Look up Funded by” is checked on load).",
+      "Funded by is the address that first sent native currency into the maker — the earliest successful normal transfer or internal transfer, including ETH attached when a contract was created. A later top-up is not used. Load Funded by again corrects a funder that was saved wrong. Only filled when “Look up Funded by” is checked, or when you press that row’s Load.",
       "Others includes >>. Click >> on a row to copy that transaction into the Blacklist tab (same columns). No checkbox is required. The list is kept on this browser for that pair.",
       "Blacklist sits next to Deep Analysis. Each row has a trash icon that removes that row immediately, with no checkbox. Empty blacklist clears the table immediately.",
       "Calculate Income uses the checked rows of the table you are viewing — the full tape, or only the blacklist.",
@@ -88,6 +88,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "High Gas Price vs gas tracker",
         body: "On Oct 26 16:12:59 EDT a GINNAN sell paid 28.562 gwei effective while the block base fee was ~0.046 gwei — the sender set a 28.562 gwei priority tip. Pair Sheet shows the receipt value; the gas tracker only plots base-fee averages.",
+      },
+      {
+        title: "Funded by on a busy wallet",
+        body: "A maker can have 100k swaps and still show Unknown if its first ETH arrived as an internal transfer years ago. Load Funded by reads the oldest normal transfer and the oldest internal transfer, then keeps the earlier sender — the same address Etherscan shows as Funded by, not a later top-up.",
       },
       {
         title: "Blacklist then income",

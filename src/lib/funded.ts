@@ -13,6 +13,11 @@ export type FundingRow = {
   value: string
   blockNumber: number
   timestamp: number
+  /** Position inside the block, then inside the trace. Lower happened first. */
+  txIndex?: number
+  traceType?: string
+  contractAddress?: string
+  failed?: boolean
   fromName?: string | null
   fromEns?: string | null
   fromTags?: string[]
@@ -23,17 +28,37 @@ export type Funder = {
   label: string
 }
 
+const SKIP_TRACE = new Set(["delegatecall", "staticcall", "invalid"])
+
+/**
+ * The first successful native credit. This is the explorer "Funded by" sender:
+ * a normal transfer, an internal call, a selfdestruct, or ETH attached to a
+ * contract creation. Later top-ups, failed traces, and self-transfers do not count.
+ */
 export function earliestIncoming(maker: string, rows: FundingRow[]): FundingRow | null {
-  const incoming = rows.filter((row) => {
-    if (!row.to || !sameAddress(row.to, maker)) return false
-    try {
-      return BigInt(row.value || "0") > 0n
-    } catch {
-      return false
-    }
-  })
-  incoming.sort((left, right) => left.blockNumber - right.blockNumber || left.timestamp - right.timestamp)
+  const incoming = rows.filter((row) => isNativeCredit(maker, row))
+  incoming.sort(
+    (left, right) =>
+      left.blockNumber - right.blockNumber ||
+      (left.txIndex ?? 0) - (right.txIndex ?? 0) ||
+      left.timestamp - right.timestamp,
+  )
   return incoming[0] ?? null
+}
+
+function isNativeCredit(maker: string, row: FundingRow): boolean {
+  if (row.failed || !row.from || sameAddress(row.from, maker)) return false
+  const trace = (row.traceType || "").toLowerCase()
+  if (SKIP_TRACE.has(trace)) return false
+  const created = trace === "create" || trace === "create2"
+  const toMaker = Boolean(row.to && sameAddress(row.to, maker))
+  const createdMaker = Boolean(created && row.contractAddress && sameAddress(row.contractAddress, maker))
+  if (!toMaker && !createdMaker) return false
+  try {
+    return BigInt(row.value || "0") > 0n
+  } catch {
+    return false
+  }
 }
 
 export function funderLabel(
@@ -69,6 +94,7 @@ export async function resolveFunders(
   const unique = [...new Set(makers.map((maker) => maker.toLowerCase()).filter(Boolean))]
   const found = new Map<string, Funder>()
   const failed: string[] = []
+  const profiles = new Map<string, Promise<{ name: string | null; ens: string | null; tags: string[] }>>()
   await mapPool(unique, 3, async (maker) => {
     if (Date.now() > deadline) {
       failed.push(maker)
@@ -79,7 +105,12 @@ export async function resolveFunders(
       const first = earliestIncoming(maker, rows)
       if (!first) return
       const address = first.from.toLowerCase()
-      const label = funderLabel(address, { name: first.fromName, ens: first.fromEns, tags: first.fromTags })
+      const profile = await cachedFunderProfile(chain, address, profiles)
+      const label = funderLabel(address, {
+        name: first.fromName || profile.name,
+        ens: first.fromEns || profile.ens,
+        tags: first.fromTags?.length ? first.fromTags : profile.tags,
+      })
       found.set(maker, { address, label })
     } catch {
       failed.push(maker)
@@ -296,73 +327,149 @@ async function solanaRpc(rpcs: string[], method: string, params: unknown[]): Pro
   throw last ?? new Error("Solana RPC failed")
 }
 
+const ACCOUNT_PAGE = 100
+const ACCOUNT_MAX_PAGES = 8
+
+function explorerApiBases(chain: ChainConfig): string[] {
+  const bases: string[] = []
+  if (chain.blockscout) bases.push(`${chain.blockscout.replace(/\/$/, "")}/api`)
+  if (chain.routescan) {
+    bases.push(`https://api.routescan.io/v2/network/mainnet/evm/${chain.chainId}/etherscan/api`)
+  }
+  return bases
+}
+
+/**
+ * Oldest-first normal transfers and oldest-first internal transfers.
+ * A busy wallet's recent history is ignored: the original credit is at the
+ * start of one of those two lists. If the first explorer has no credit, the
+ * next explorer is checked the same way.
+ */
 async function fundingRows(chain: ChainConfig, maker: string): Promise<FundingRow[]> {
-  if (chain.blockscout) {
-    const [internalRows, normalRows] = await Promise.all([
-      blockscoutList(chain.blockscout, maker, "internal-transactions"),
-      blockscoutList(chain.blockscout, maker, "transactions"),
-    ])
-    return [...internalRows, ...normalRows]
+  const bases = explorerApiBases(chain)
+  if (bases.length === 0) return []
+  const collected: FundingRow[] = []
+  let lastError: Error | null = null
+  for (const base of bases) {
+    try {
+      const [normal, internal] = await Promise.all([
+        firstNativeCredit(base, maker, "txlist"),
+        firstNativeCredit(base, maker, "txlistinternal"),
+      ])
+      if (normal.row) collected.push(normal.row)
+      if (internal.row) collected.push(internal.row)
+      const incomplete = normal.incomplete || internal.incomplete
+      if (!incomplete && earliestIncoming(maker, collected)) return collected
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("funding lookup failed")
+    }
   }
-  if (!chain.routescan) return []
-  return accountRows(`https://api.routescan.io/v2/network/mainnet/evm/${chain.chainId}/etherscan/api`, maker)
+  if (collected.length === 0 && lastError) throw lastError
+  return collected
 }
 
-async function blockscoutList(
-  host: string,
+async function firstNativeCredit(
+  base: string,
   maker: string,
-  kind: "internal-transactions" | "transactions",
-): Promise<FundingRow[]> {
-  const rows: FundingRow[] = []
-  const oldestFirst = kind === "transactions"
-  let params = oldestFirst ? "?sort=block_number&order=asc" : ""
-  for (let page = 0; page < 4; page += 1) {
-    const url = `${host}/api/v2/addresses/${maker}/${kind}${params}`
-    const body = (await fetchFunding(url)) as {
-      items?: unknown[]
-      next_page_params?: Record<string, string | number | null> | null
+  action: "txlist" | "txlistinternal",
+): Promise<{ row: FundingRow | null; incomplete: boolean }> {
+  let startblock = 0
+  let incomplete = false
+  for (let page = 0; page < ACCOUNT_MAX_PAGES; page += 1) {
+    const loaded = await accountPage(base, maker, action, startblock)
+    incomplete = incomplete || loaded.incomplete
+    const items = loaded.items
+    if (items.length === 0) return { row: null, incomplete }
+    const blocks = items.map(blockOf).filter((block) => block > 0)
+    if (blocks.length >= 2 && blocks[0] > blocks[blocks.length - 1]) {
+      throw new Error("funding history was not oldest-first")
     }
-    for (const item of body.items ?? []) {
-      const parsed = parseBlockscout(item)
-      if (parsed) rows.push(parsed)
-    }
-    if (oldestFirst && earliestIncoming(maker, rows)) break
-    const next = body.next_page_params
-    if (!next) break
-    params = `?${new URLSearchParams(
-      Object.entries(next)
-        .filter((entry): entry is [string, string | number] => entry[1] !== null && entry[1] !== undefined)
-        .map(([key, value]) => [key, String(value)]),
-    )}`
+    const rows = items.flatMap((item) => {
+      const parsed = parseExplorer(item)
+      return parsed ? [parsed] : []
+    })
+    const newest = blocks.length > 0 ? blocks[blocks.length - 1] : rows[rows.length - 1]?.blockNumber ?? startblock
+    const first = earliestIncoming(maker, rows)
+    if (first) return { row: first, incomplete }
+    if (items.length < ACCOUNT_PAGE) return { row: null, incomplete }
+    const nextStart = newest + 1
+    if (nextStart <= startblock) return { row: null, incomplete }
+    startblock = nextStart
   }
-  return rows
+  return { row: null, incomplete }
 }
 
-// Etherscan-style account API. Sorted oldest first, so a wallet's first
-// incoming transfer is in the first page no matter how busy the wallet is.
-async function accountRows(base: string, maker: string): Promise<FundingRow[]> {
-  const lists = await Promise.all(
-    ["txlistinternal", "txlist"].map(async (action) => {
-      const params = new URLSearchParams({
-        module: "account",
-        action,
-        address: maker,
-        startblock: "0",
-        endblock: "99999999",
-        page: "1",
-        offset: "25",
-        sort: "asc",
-      })
-      const body = (await fetchFunding(`${base}?${params}`)) as { result?: unknown }
-      return Array.isArray(body.result) ? body.result : []
-    }),
-  )
-  const rows: FundingRow[] = []
-  for (const item of lists.flat()) {
-    const parsed = parseExplorer(item)
-    if (parsed) rows.push(parsed)
+async function accountPage(
+  base: string,
+  maker: string,
+  action: "txlist" | "txlistinternal",
+  startblock: number,
+): Promise<{ items: unknown[]; incomplete: boolean }> {
+  const params = new URLSearchParams({
+    module: "account",
+    action,
+    address: maker,
+    startblock: String(startblock),
+    endblock: "99999999",
+    page: "1",
+    offset: String(ACCOUNT_PAGE),
+    sort: "asc",
+  })
+  const body = (await fetchFunding(`${base}?${params}`)) as { status?: string; message?: string; result?: unknown }
+  const message = typeof body.message === "string" ? body.message : ""
+  const incomplete = /not yet been processed/i.test(message)
+  if (Array.isArray(body.result)) return { items: body.result, incomplete }
+  const result = typeof body.result === "string" ? body.result : ""
+  if (/no transactions|no records|no internal/i.test(result)) return { items: [], incomplete }
+  if (body.status === "0" || body.message === "NOTOK") {
+    throw new Error(result || message || "funding lookup failed")
   }
-  return rows
+  return { items: [], incomplete }
+}
+
+function cachedFunderProfile(
+  chain: ChainConfig,
+  address: string,
+  cache: Map<string, Promise<{ name: string | null; ens: string | null; tags: string[] }>>,
+): Promise<{ name: string | null; ens: string | null; tags: string[] }> {
+  const key = address.toLowerCase()
+  const existing = cache.get(key)
+  if (existing) return existing
+  const pending = lookupFunderProfile(chain, key)
+  cache.set(key, pending)
+  return pending
+}
+
+async function lookupFunderProfile(
+  chain: ChainConfig,
+  address: string,
+): Promise<{ name: string | null; ens: string | null; tags: string[] }> {
+  const empty = { name: null, ens: null, tags: [] as string[] }
+  if (!chain.blockscout) return empty
+  try {
+    const body = (await fetchJson(
+      `${chain.blockscout.replace(/\/$/, "")}/api/v2/addresses/${address}`,
+      undefined,
+      8000,
+      1,
+    )) as Record<string, unknown>
+    const tags = Array.isArray(body.public_tags)
+      ? body.public_tags
+          .map((tag) => {
+            if (!tag || typeof tag !== "object") return ""
+            const record = tag as { display_name?: string; label?: string }
+            return record.display_name || record.label || ""
+          })
+          .filter(Boolean)
+      : []
+    return {
+      name: typeof body.name === "string" ? body.name : null,
+      ens: typeof body.ens_domain_name === "string" ? body.ens_domain_name : null,
+      tags,
+    }
+  } catch {
+    return empty
+  }
 }
 
 async function fetchFunding(url: string, attempts = 2): Promise<unknown> {
@@ -379,60 +486,36 @@ async function fetchFunding(url: string, attempts = 2): Promise<unknown> {
   throw last ?? new Error("funding lookup failed")
 }
 
-function parseBlockscout(item: unknown): FundingRow | null {
-  if (!item || typeof item !== "object") return null
-  const row = item as Record<string, unknown>
-  const from = party(row.from)
-  const to = party(row.to)
-  if (!from?.hash || !to?.hash) return null
-  const timestamp = typeof row.timestamp === "string" ? Date.parse(row.timestamp) : 0
-  return {
-    from: from.hash,
-    to: to.hash,
-    value: typeof row.value === "string" || typeof row.value === "number" ? String(row.value) : "0",
-    blockNumber: Number(row.block_number) || 0,
-    timestamp: Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0,
-    fromName: from.name,
-    fromEns: from.ens,
-    fromTags: from.tags,
-  }
-}
-
-function party(value: unknown): { hash: string; name: string | null; ens: string | null; tags: string[] } | null {
-  if (!value || typeof value !== "object") return null
-  const row = value as Record<string, unknown>
-  if (typeof row.hash !== "string") return null
-  const tags = Array.isArray(row.public_tags)
-    ? row.public_tags
-        .map((tag) => {
-          if (!tag || typeof tag !== "object") return ""
-          const record = tag as { display_name?: string; label?: string }
-          return record.display_name || record.label || ""
-        })
-        .filter(Boolean)
-    : []
-  return {
-    hash: row.hash,
-    name: typeof row.name === "string" ? row.name : null,
-    ens: typeof row.ens_domain_name === "string" ? row.ens_domain_name : null,
-    tags,
-  }
+export function fundingRowFromExplorer(item: unknown): FundingRow | null {
+  return parseExplorer(item)
 }
 
 function parseExplorer(item: unknown): FundingRow | null {
   if (!item || typeof item !== "object") return null
   const row = item as Record<string, unknown>
   const from = typeof row.from === "string" ? row.from : ""
+  if (!from) return null
   const to = typeof row.to === "string" ? row.to : ""
-  if (!from || !to) return null
-  if (row.isError === "1" || row.txreceipt_status === "0") return null
+  const contractAddress = typeof row.contractAddress === "string" ? row.contractAddress : ""
+  const traceType = typeof row.type === "string" ? row.type : ""
+  const txIndex = numberField(row.transactionIndex)
+  const traceId = numberField(row.traceId)
   return {
     from,
     to,
+    contractAddress,
+    traceType,
     value: typeof row.value === "string" || typeof row.value === "number" ? String(row.value) : "0",
     blockNumber: numberField(row.blockNumber),
     timestamp: numberField(row.timeStamp),
+    txIndex: txIndex * 1_000_000 + traceId,
+    failed: row.isError === "1" || row.txreceipt_status === "0",
   }
+}
+
+function blockOf(item: unknown): number {
+  if (!item || typeof item !== "object") return 0
+  return numberField((item as { blockNumber?: unknown }).blockNumber)
 }
 
 function numberField(value: unknown): number {

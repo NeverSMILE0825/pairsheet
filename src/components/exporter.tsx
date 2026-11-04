@@ -685,7 +685,7 @@ export function Exporter() {
               current.map((trade) => {
                 const key = solana ? trade.maker : trade.maker.toLowerCase()
                 const match = found.get(key)
-                return match && !trade.fundedByAddress
+                return match
                   ? { ...trade, fundedBy: match.label, fundedByAddress: match.address }
                   : trade
               }),
