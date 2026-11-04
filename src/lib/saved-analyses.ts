@@ -41,6 +41,10 @@ export type SavedAnalysisPayload = {
   facts: WalletFacts
   warning: string | null
   capped: boolean
+  /** Present once Funded by has been resolved with the current rule. */
+  funderRevision?: number
+  /** Makers already checked. Blank funders in this list have no ETH credit. */
+  funderChecked?: string[]
 }
 
 export function analysisId(pool: Pick<PoolView, "chainId" | "address">): string {
@@ -195,6 +199,8 @@ export async function saveAnalysis(input: {
   /** Preserve original time when importing a vault. */
   savedAt?: string
   starred?: boolean
+  funderRevision?: number
+  funderChecked?: string[]
 }): Promise<SaveAnalysisResult> {
   if (typeof indexedDB === "undefined") {
     throw new Error("Saved analyses need a browser with IndexedDB.")
@@ -203,10 +209,14 @@ export async function saveAnalysis(input: {
   const savedAt = input.savedAt && Number.isFinite(Date.parse(input.savedAt)) ? input.savedAt : new Date().toISOString()
   const db = await openDb()
   let existing: SavedAnalysisMeta | undefined
+  let existingPayload: SavedAnalysisPayload | undefined
   try {
-    const readTx = db.transaction(META_STORE, "readonly")
+    const readTx = db.transaction([META_STORE, PAYLOAD_STORE], "readonly")
     existing = await requestToPromise(
       readTx.objectStore(META_STORE).get(id) as IDBRequest<SavedAnalysisMeta | undefined>,
+    )
+    existingPayload = await requestToPromise(
+      readTx.objectStore(PAYLOAD_STORE).get(id) as IDBRequest<SavedAnalysisPayload | undefined>,
     )
     await transactionDone(readTx)
   } finally {
@@ -234,6 +244,8 @@ export async function saveAnalysis(input: {
     facts: input.facts,
     warning: input.warning,
     capped: input.capped,
+    funderRevision: input.funderRevision !== undefined ? input.funderRevision : existingPayload?.funderRevision,
+    funderChecked: input.funderChecked !== undefined ? input.funderChecked : existingPayload?.funderChecked,
   }
 
   // Bookmark row first — shared list / Open dialog must not depend on tape fitting.
@@ -342,6 +354,8 @@ export async function importSavedVault(vault: SavedVault): Promise<number> {
       facts: payload.facts,
       warning: payload.warning,
       capped: payload.capped,
+      funderRevision: payload.funderRevision,
+      funderChecked: payload.funderChecked,
       savedAt: payload.savedAt || metaFromVault?.savedAt,
       starred: Boolean(metaFromVault?.starred),
     })

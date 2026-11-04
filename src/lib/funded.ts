@@ -28,6 +28,62 @@ export type Funder = {
   label: string
 }
 
+/** Bump when the funding rule changes so saved tapes are checked again on open. */
+export const FUNDER_REVISION = 1
+
+export function makerFunderKey(chainId: string, maker: string): string {
+  const trimmed = maker.trim()
+  return chainId === "solana" ? trimmed : trimmed.toLowerCase()
+}
+
+/**
+ * Wallets to resolve when a saved tape is opened.
+ * A tape saved before the current rule is refreshed once if it already has
+ * funders, or if the user asked to load them. Later opens only fill makers
+ * that are still blank and have not been checked.
+ */
+export function makersToRefresh(
+  chainId: string,
+  trades: Array<{ maker: string; fundedByAddress: string | null }>,
+  revision: number | undefined,
+  checked: string[] | undefined,
+  lookupRequested: boolean,
+): string[] {
+  const funded = new Set<string>()
+  const makers: string[] = []
+  const seen = new Set<string>()
+  for (const trade of trades) {
+    if (!trade.maker) continue
+    const key = makerFunderKey(chainId, trade.maker)
+    if (!key) continue
+    if (trade.fundedByAddress) funded.add(key)
+    if (seen.has(key)) continue
+    seen.add(key)
+    makers.push(key)
+  }
+  const stale = revision !== FUNDER_REVISION
+  if (stale && funded.size === 0 && !lookupRequested) return []
+  const already = new Set((stale ? [] : (checked ?? [])).map((item) => makerFunderKey(chainId, item)))
+  return makers.filter((key) => !already.has(key) && (stale || !funded.has(key)))
+}
+
+export function applyFunderResults<T extends { maker: string; fundedBy: string | null; fundedByAddress: string | null }>(
+  chainId: string,
+  trades: T[],
+  found: Map<string, Funder>,
+): { trades: T[]; changed: boolean } {
+  let changed = false
+  const next = trades.map((trade) => {
+    if (!trade.maker) return trade
+    const match = found.get(makerFunderKey(chainId, trade.maker))
+    if (!match) return trade
+    if (trade.fundedBy === match.label && trade.fundedByAddress === match.address) return trade
+    changed = true
+    return { ...trade, fundedBy: match.label, fundedByAddress: match.address }
+  })
+  return { trades: changed ? next : trades, changed }
+}
+
 const SKIP_TRACE = new Set(["delegatecall", "staticcall", "invalid"])
 
 /**

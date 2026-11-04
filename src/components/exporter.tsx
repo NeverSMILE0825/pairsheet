@@ -30,7 +30,7 @@ import {
   type DaColumnId,
   type TxColumnId,
 } from "@/lib/table-columns"
-import { resolveFunders } from "@/lib/funded"
+import { FUNDER_REVISION, applyFunderResults, makerFunderKey, makersToRefresh, resolveFunders, type Funder } from "@/lib/funded"
 import { resolveHolderCounts } from "@/lib/holders"
 import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
 import { getSwapPage, mergeNewTrades, newestTradeBlock } from "@/lib/history"
@@ -1402,6 +1402,83 @@ export function Exporter() {
           supplyFixed = repriced.changed
         }
         setPool(poolView)
+        const pairLabel = `${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}`
+        let fundersUpdated = 0
+        let fundersUnknown = 0
+        let fundersFailed = 0
+        const funderTargets = chain
+          ? makersToRefresh(chain.id, trades, saved.funderRevision, saved.funderChecked, lookupFunders)
+          : []
+        let funderChecked = saved.funderChecked
+        let funderRevision = saved.funderRevision
+        if (chain && funderTargets.length > 0) {
+          const solana = chain.id === "solana"
+          const earliestTradeSec = new Map<string, number>()
+          if (solana) {
+            for (const trade of trades) {
+              if (!trade.maker) continue
+              const ts = Math.floor(Date.parse(trade.timestamp) / 1000)
+              if (!Number.isFinite(ts)) continue
+              const key = makerFunderKey(chain.id, trade.maker)
+              const prev = earliestTradeSec.get(key)
+              if (prev === undefined || ts < prev) earliestTradeSec.set(key, ts)
+            }
+          }
+          const found = new Map<string, Funder>()
+          const failed = new Set<string>()
+          const batchSize = 8
+          for (let index = 0; index < funderTargets.length; index += batchSize) {
+            if (run.current !== token) return
+            const batch = funderTargets.slice(index, index + batchSize)
+            setProgress(
+              `Updating Funded by… ${Math.min(index + batch.length, funderTargets.length).toLocaleString("en-US")} / ${funderTargets.length.toLocaleString("en-US")} wallets`,
+            )
+            try {
+              const result = await resolveFunders(
+                chain,
+                batch,
+                Date.now() + 60_000,
+                solana ? earliestTradeSec : undefined,
+              )
+              for (const [key, value] of result.found) found.set(key, value)
+              for (const maker of result.failed) failed.add(maker)
+            } catch {
+              for (const maker of batch) failed.add(maker)
+            }
+          }
+          if (run.current !== token) return
+          const applied = applyFunderResults(chain.id, trades, found)
+          trades = applied.trades
+          const checked = new Set(
+            (saved.funderRevision === FUNDER_REVISION ? (saved.funderChecked ?? []) : []).map((item) =>
+              makerFunderKey(chain.id, item),
+            ),
+          )
+          for (const maker of funderTargets) {
+            if (failed.has(maker)) continue
+            checked.add(maker)
+            if (found.has(maker)) fundersUpdated += 1
+            else fundersUnknown += 1
+          }
+          fundersFailed = failed.size
+          funderChecked = [...checked]
+          funderRevision = failed.size === 0 ? FUNDER_REVISION : saved.funderRevision
+          if (applied.changed || failed.size < funderTargets.length) {
+            await saveAnalysis({
+              url: saved.url,
+              pool: poolView,
+              trades,
+              facts: saved.facts,
+              warning: saved.warning,
+              capped: saved.capped,
+              savedAt: saved.savedAt,
+              starred: meta?.starred,
+              funderRevision,
+              funderChecked,
+            }).catch(() => null)
+            await refreshSavedList().catch(() => null)
+          }
+        }
         setTrades(trades)
         setPhase("done")
         setProgress("")
@@ -1415,31 +1492,47 @@ export function Exporter() {
             capped: saved.capped,
             savedAt: saved.savedAt,
             starred: meta?.starred,
+            funderRevision,
+            funderChecked,
           }).catch(() => null)
           await refreshSavedList().catch(() => null)
         }
+        const funderNote =
+          fundersUpdated > 0
+            ? ` Updated Funded by for ${fundersUpdated.toLocaleString("en-US")} wallet${fundersUpdated === 1 ? "" : "s"}.`
+            : ""
+        const unknownNote =
+          fundersUnknown > 0
+            ? ` ${fundersUnknown.toLocaleString("en-US")} wallet${fundersUnknown === 1 ? "" : "s"} have no ETH credit.`
+            : ""
+        const retryNote =
+          fundersFailed > 0
+            ? ` ${fundersFailed.toLocaleString("en-US")} wallet${fundersFailed === 1 ? "" : "s"} will be checked again next open.`
+            : ""
         if (repaired && supplyFixed) {
           flashNotice(
-            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}, refreshed gas, and corrected market caps from the token’s total supply.`,
-            stillMissing > 0 ? "info" : "ok",
+            `Opened saved ${pairLabel}, refreshed gas, and corrected market caps from the token’s total supply.${funderNote}${unknownNote}${retryNote}`,
+            stillMissing > 0 || fundersFailed > 0 ? "info" : "ok",
           )
           setGasSavePrompt(stillMissing > 0 || repaired)
-        } else if (supplyFixed) {
+        } else if (supplyFixed || fundersUpdated > 0) {
           flashNotice(
-            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and corrected market caps from the token’s total supply.`,
-            "ok",
+            `Opened saved ${pairLabel}${supplyFixed ? " and corrected market caps from the token’s total supply." : "."}${funderNote}${unknownNote}${retryNote}`,
+            fundersFailed > 0 ? "info" : "ok",
           )
         } else if (repaired) {
           flashNotice(
             stillMissing > 0
-              ? `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}; refreshed gas but ${stillMissing.toLocaleString("en-US")} txs still lack receipts.`
-              : `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} and refreshed gas fee columns.`,
-            stillMissing > 0 ? "info" : "ok",
+              ? `Opened saved ${pairLabel}; refreshed gas but ${stillMissing.toLocaleString("en-US")} txs still lack receipts.${funderNote}${unknownNote}${retryNote}`
+              : `Opened saved ${pairLabel} and refreshed gas fee columns.${funderNote}${unknownNote}${retryNote}`,
+            stillMissing > 0 || fundersFailed > 0 ? "info" : "ok",
           )
           setGasSavePrompt(true)
+        } else if (funderNote || unknownNote || retryNote) {
+          flashNotice(`Opened saved ${pairLabel}.${funderNote}${unknownNote}${retryNote}`, fundersFailed > 0 ? "info" : "ok")
         } else {
           flashNotice(
-            `Opened saved ${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol} from ${formatSavedAt(saved.savedAt)}.`,
+            `Opened saved ${pairLabel} from ${formatSavedAt(saved.savedAt)}.`,
             "ok",
           )
         }

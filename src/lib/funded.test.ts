@@ -1,6 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { earliestIncoming, fundingRowFromExplorer, type FundingRow } from "./funded"
+import {
+  FUNDER_REVISION,
+  applyFunderResults,
+  earliestIncoming,
+  fundingRowFromExplorer,
+  makersToRefresh,
+  type FundingRow,
+} from "./funded"
 
 const maker = "0x591f85c11cafea17f7cc926f13e2ed7c794f2522"
 
@@ -45,6 +52,34 @@ test("funded by keeps ETH sent when the contract was created", () => {
     row({ from: "0x00000000000000000000000000000000000000dd", blockNumber: 11 }),
   ])
   assert.equal(first?.from, "0x00000000000000000000000000000000000000cc")
+})
+
+test("opening a saved tape refreshes every maker until the current rule is stored", () => {
+  const trades = [
+    { maker: "0xAAAA", fundedByAddress: "0x1111" },
+    { maker: "0xBBBB", fundedByAddress: null },
+  ]
+  assert.deepEqual(makersToRefresh("ether", trades, undefined, undefined, false), ["0xaaaa", "0xbbbb"])
+  assert.deepEqual(makersToRefresh("ether", trades, FUNDER_REVISION, ["0xaaaa", "0xbbbb"], false), [])
+  assert.deepEqual(makersToRefresh("ether", trades, FUNDER_REVISION, ["0xaaaa"], false), ["0xbbbb"])
+  assert.deepEqual(
+    makersToRefresh("ether", [{ maker: "0xAAAA", fundedByAddress: null }], undefined, undefined, false),
+    [],
+  )
+  assert.deepEqual(
+    makersToRefresh("ether", [{ maker: "0xAAAA", fundedByAddress: null }], undefined, undefined, true),
+    ["0xaaaa"],
+  )
+})
+
+test("applying a funder replaces a saved address", () => {
+  const applied = applyFunderResults(
+    "ether",
+    [{ maker: "0xAAAA", fundedBy: "0x1111…1111", fundedByAddress: "0x1111111111111111111111111111111111111111" }],
+    new Map([["0xaaaa", { address: "0x2222222222222222222222222222222222222222", label: "0x2222…2222" }]]),
+  )
+  assert.equal(applied.changed, true)
+  assert.equal(applied.trades[0].fundedByAddress, "0x2222222222222222222222222222222222222222")
 })
 
 test("funded by ignores failed traces, self transfers, delegatecalls, and zero-value creates", () => {
