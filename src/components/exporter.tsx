@@ -84,6 +84,7 @@ import {
 import {
   cacheBookmarkMetas,
   clearSync,
+  dismissBookmark,
   fetchRemoteBookmarks,
   formatSyncAgo,
   getSyncStatus,
@@ -93,9 +94,11 @@ import {
   isSyncSuccessful,
   publishBookmarks,
   readCachedBookmarkMetas,
+  restoreBookmark,
   setSyncToken,
   syncTokenHelpUrl,
   validateSyncToken,
+  withoutDismissed,
   type SyncStatus,
 } from "@/lib/bookmarks-sync"
 import {
@@ -587,10 +590,10 @@ export function Exporter() {
   async function refreshSavedList() {
     try {
       const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
-      if (local.length > 0) cacheBookmarkMetas(local)
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       const remote = await fetchRemoteBookmarks()
-      const merged = mergeSavedMeta(local, remote.bookmarks)
+      const merged = withoutDismissed(mergeSavedMeta(local, remote.bookmarks))
+      cacheBookmarkMetas(merged, { replace: true })
       setSavedList(merged)
       // Re-read status after pull — pull must not wipe a successful publish badge.
       setSyncStatus(getSyncStatus())
@@ -603,27 +606,25 @@ export function Exporter() {
     const fromDb = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
     const fromUi = savedList.filter((item) => localSavedIds.has(item.id))
     const fromCache = readCachedBookmarkMetas()
-    const merged = mergeSavedMeta(mergeSavedMeta(fromDb, fromUi), fromCache)
-    if (merged.length > 0) cacheBookmarkMetas(merged)
+    const merged = withoutDismissed(mergeSavedMeta(mergeSavedMeta(fromDb, fromUi), fromCache))
+    if (merged.length > 0) cacheBookmarkMetas(merged, { replace: true })
     return merged
   }
 
   async function publishMergedBookmarks(nextLocal?: SavedAnalysisMeta[], tokenOverride?: string) {
     const token = (tokenOverride ?? getSyncToken()).trim()
     if (!token) throw new Error("Add a GitHub sync token first.")
-    const local = nextLocal ?? (await localBookmarksForPublish())
-    if (local.length === 0) {
+    const local = withoutDismissed(nextLocal ?? (await localBookmarksForPublish()))
+    cacheBookmarkMetas(local, { replace: true })
+    const remote = await fetchRemoteBookmarks()
+    const merged = withoutDismissed(mergeSavedMeta(local, remote.bookmarks))
+    const removedShared = remote.bookmarks.some((item) => !merged.some((row) => row.id === item.id))
+    if (merged.length === 0 && !removedShared) {
       throw new Error("No local saved pairs to publish. Save a pair on this browser first, then Publish now.")
     }
-    cacheBookmarkMetas(local)
-    const remote = await fetchRemoteBookmarks()
-    const merged = mergeSavedMeta(local, remote.bookmarks)
-    if (merged.length === 0) {
-      throw new Error("Nothing to publish after merging with the shared list.")
-    }
-    const catalog = await publishBookmarks(merged, token)
+    const catalog = await publishBookmarks(merged, token, { allowEmpty: merged.length === 0 })
     setLocalSavedIds(new Set(local.map((item) => item.id)))
-    setSavedList(mergeSavedMeta(local, catalog.bookmarks))
+    setSavedList(withoutDismissed(mergeSavedMeta(local, catalog.bookmarks)))
     setSyncStatus(getSyncStatus())
     setSyncEnabled(true)
     return catalog
@@ -1385,6 +1386,7 @@ export function Exporter() {
         warning,
         capped,
       })
+      restoreBookmark(meta.id)
       cacheBookmarkMetas([meta])
       const local = await listSavedAnalyses()
       setLocalSavedIds(new Set(local.map((item) => item.id)))
@@ -1635,17 +1637,22 @@ export function Exporter() {
     if (!deleteTarget || deleteBusy) return
     const id = deleteTarget.id
     const label = `${deleteTarget.baseSymbol} / ${deleteTarget.quoteSymbol}`
-    const wasLocal = localSavedIds.has(id)
     setDeleteBusy(true)
     setDeleteResult(null)
     try {
+      dismissBookmark(id)
       await deleteSavedAnalysis(id)
+      cacheBookmarkMetas(
+        withoutDismissed(readCachedBookmarkMetas().filter((item) => item.id !== id)),
+        { replace: true },
+      )
       const local = await listSavedAnalyses().catch(() => [] as SavedAnalysisMeta[])
       setLocalSavedIds(new Set(local.map((item) => item.id)))
+      setSavedList((current) => current.filter((item) => item.id !== id))
       if (hasSyncToken()) {
         try {
           const remote = await fetchRemoteBookmarks()
-          const merged = mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id)
+          const merged = withoutDismissed(mergeSavedMeta(local, remote.bookmarks).filter((item) => item.id !== id))
           await publishBookmarks(merged, undefined, { allowEmpty: true })
           setSavedList(merged)
           setSyncStatus(getSyncStatus())
@@ -1653,25 +1660,20 @@ export function Exporter() {
           setDeleteResult({ ok: true, message })
           flashNotice(message, "ok")
         } catch (syncError) {
-          await refreshSavedList()
-          const message = `${label} was deleted on this browser, but the shared list could not be updated: ${
+          const message = `${label} was removed from this browser, but the shared list could not be updated: ${
             syncError instanceof Error ? syncError.message : "unknown error"
           }`
           setDeleteResult({ ok: false, message })
           flashNotice(message, "error")
         }
-      } else if (!wasLocal) {
-        setSavedList((current) => current.filter((item) => item.id !== id))
-        const message = `${label} is only on the shared list. Enable sync (GitHub token) to delete it for every browser.`
-        setDeleteResult({ ok: false, message })
-        flashNotice(message, "error")
-        await refreshSavedList()
       } else {
-        setSavedList((current) => current.filter((item) => item.id !== id))
-        const message = `${label} was deleted successfully from this browser.`
+        const remote = await fetchRemoteBookmarks().catch(() => null)
+        const stillShared = Boolean(remote?.bookmarks.some((item) => item.id === id))
+        const message = stillShared
+          ? `${label} was removed from this browser. Other PCs still show it until you enable sync and publish.`
+          : `${label} was deleted from this browser.`
         setDeleteResult({ ok: true, message })
         flashNotice(message, "ok")
-        await refreshSavedList()
       }
     } catch (error) {
       const message = `Could not delete ${label}: ${error instanceof Error ? error.message : "unknown error"}`
@@ -1728,6 +1730,7 @@ export function Exporter() {
       const vault = JSON.parse(text) as SavedVault
       const count = await importSavedVault(vault)
       const local = await listSavedAnalyses()
+      for (const item of local) restoreBookmark(item.id)
       setLocalSavedIds(new Set(local.map((item) => item.id)))
       if (hasSyncToken()) await publishMergedBookmarks(local)
       else await refreshSavedList()
@@ -2232,9 +2235,7 @@ export function Exporter() {
                   Remove <span className="font-medium text-foreground">{deleteTarget.baseSymbol} / {deleteTarget.quoteSymbol}</span>
                   {hasSyncToken()
                     ? " from this browser and the shared bookmark list? This cannot be undone."
-                    : localSavedIds.has(deleteTarget.id)
-                      ? " from this browser? Enable sync to also remove it from the shared list."
-                      : " — this row is only on the shared list. Enable sync to delete it for every browser."}
+                    : " from this browser? Other PCs keep it until you enable sync and publish."}
                 </p>
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <Button type="button" variant="ghost" disabled={deleteBusy} onClick={closeDeleteModal}>
@@ -2243,7 +2244,7 @@ export function Exporter() {
                   <Button
                     type="button"
                     variant="destructive"
-                    disabled={deleteBusy || (!localSavedIds.has(deleteTarget.id) && !hasSyncToken())}
+                    disabled={deleteBusy}
                     onClick={() => void confirmDeleteSaved()}
                   >
                     {deleteBusy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}

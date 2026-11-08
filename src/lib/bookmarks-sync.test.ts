@@ -4,6 +4,8 @@ import {
   bookmarkSyncFingerprint,
   describeBookmarkSync,
   isSyncSuccessful,
+  nextBookmarkCache,
+  withoutDismissed,
   type SyncStatus,
 } from "./bookmarks-sync"
 import { mergeSavedMeta, type SavedAnalysisMeta } from "./saved-analyses"
@@ -35,6 +37,21 @@ test("mergeSavedMeta keeps stars and prefers newer saves", () => {
   assert.equal(merged[0].starred, true)
   assert.equal(merged[0].tradeCount, 10)
   assert.equal(merged[1].id, "b")
+})
+
+test("withoutDismissed hides a pair the user already deleted", () => {
+  const rows = [meta({ id: "a" }), meta({ id: "b", baseSymbol: "BBB" })]
+  assert.deepEqual(withoutDismissed(rows, ["b"]).map((item) => item.id), ["a"])
+  assert.equal(withoutDismissed(rows, []).length, 2)
+})
+
+test("replacing the bookmark cache drops a deleted pair", () => {
+  const previous = [meta({ id: "a" }), meta({ id: "b", baseSymbol: "BBB" })]
+  const incoming = [meta({ id: "a", savedAt: "2026-10-29T00:00:00.000Z" })]
+  const replaced = nextBookmarkCache(previous, incoming, true)
+  assert.deepEqual(replaced.map((item) => item.id), ["a"])
+  const merged = nextBookmarkCache(previous, incoming, false)
+  assert.deepEqual(merged.map((item) => item.id).sort(), ["a", "b"])
 })
 
 test("isSyncSuccessful requires a non-empty successful publish, not lastAction alone", () => {

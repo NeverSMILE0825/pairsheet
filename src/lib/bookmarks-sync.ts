@@ -8,6 +8,8 @@ export const SYNC_TOKEN_KEY = "pairsheet.githubSyncToken"
 export const SYNC_STATUS_KEY = "pairsheet.githubSyncStatus"
 /** Last known metas on this browser — backup if IndexedDB briefly fails during publish. */
 export const BOOKMARK_CACHE_KEY = "pairsheet.bookmarkMetaCache"
+/** Pairs removed from this browser. A later Open must not restore them from the shared list. */
+export const DISMISSED_KEY = "pairsheet.dismissedBookmarks"
 
 const RAW_URL = `https://raw.githubusercontent.com/${SYNC_REPO}/main/${SYNC_PATH}`
 const PAGES_URL = `https://neversmile0825.github.io/pairsheet/data/bookmarks.json`
@@ -47,6 +49,7 @@ const emptyStatus = (): SyncStatus => ({
 let memoryToken = ""
 let memoryStatus: SyncStatus = emptyStatus()
 let memoryMetaCache: SavedAnalysisMeta[] = []
+let memoryDismissed: string[] | null = null
 let hydratePromise: Promise<void> | null = null
 
 function readLocal(key: string): string | null {
@@ -281,8 +284,55 @@ export function readCachedBookmarkMetas(): SavedAnalysisMeta[] {
   }
 }
 
-export function cacheBookmarkMetas(metas: SavedAnalysisMeta[]): void {
-  const merged = mergeSavedMeta(metas, readCachedBookmarkMetas())
+export function readDismissedIds(): string[] {
+  if (memoryDismissed) return memoryDismissed
+  if (typeof window === "undefined") {
+    memoryDismissed = []
+    return memoryDismissed
+  }
+  try {
+    const parsed = JSON.parse(readLocal(DISMISSED_KEY) || "[]") as unknown
+    memoryDismissed = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && id.length > 0) : []
+  } catch {
+    memoryDismissed = []
+  }
+  return memoryDismissed
+}
+
+function writeDismissed(ids: string[]): void {
+  memoryDismissed = ids
+  writeLocal(DISMISSED_KEY, JSON.stringify(ids))
+}
+
+/** Hide a pair on this browser so the shared list cannot put the row back. */
+export function dismissBookmark(id: string): void {
+  if (!id) return
+  writeDismissed([...new Set([...readDismissedIds(), id])])
+}
+
+/** A new save or import of this pair should show it again. */
+export function restoreBookmark(id: string): void {
+  if (!id) return
+  writeDismissed(readDismissedIds().filter((item) => item !== id))
+}
+
+export function withoutDismissed<T extends { id: string }>(rows: T[], dismissed: readonly string[] = readDismissedIds()): T[] {
+  if (dismissed.length === 0) return rows
+  const gone = new Set(dismissed)
+  return rows.filter((row) => !gone.has(row.id))
+}
+
+/** Merge keeps older rows. Replace is the saved list after a delete or a confirmed publish. */
+export function nextBookmarkCache(
+  previous: SavedAnalysisMeta[],
+  incoming: SavedAnalysisMeta[],
+  replace: boolean,
+): SavedAnalysisMeta[] {
+  return replace ? mergeSavedMeta(incoming, []) : mergeSavedMeta(incoming, previous)
+}
+
+export function cacheBookmarkMetas(metas: SavedAnalysisMeta[], options?: { replace?: boolean }): void {
+  const merged = nextBookmarkCache(readCachedBookmarkMetas(), metas, Boolean(options?.replace))
   memoryMetaCache = merged
   writeLocal(BOOKMARK_CACHE_KEY, JSON.stringify(merged))
   void idbSet(IDB_META_CACHE_KEY, merged).catch(() => {
@@ -544,7 +594,7 @@ export async function publishBookmarks(
 
     // Same pair list as GitHub — do not bump updatedAt or open another empty commit.
     if (!commitMessage) {
-      if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks)
+      if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks, { replace: true })
       writeSyncStatus({
         lastOkAt: remote.updatedAt ?? new Date().toISOString(),
         lastError: null,
@@ -569,7 +619,7 @@ export async function publishBookmarks(
       ;({ sha, catalog: remote } = await readRemoteFile(token))
       const retryMessage = describeBookmarkSync(remote.bookmarks, bookmarksSorted)
       if (!retryMessage) {
-        if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks)
+        if (remote.bookmarks.length > 0) cacheBookmarkMetas(remote.bookmarks, { replace: true })
         writeSyncStatus({
           lastOkAt: remote.updatedAt ?? catalog.updatedAt,
           lastError: null,
@@ -596,7 +646,7 @@ export async function publishBookmarks(
       throw new Error(message)
     }
 
-    if (verified.catalog.bookmarks.length > 0) cacheBookmarkMetas(verified.catalog.bookmarks)
+    cacheBookmarkMetas(verified.catalog.bookmarks, { replace: true })
     writeSyncStatus({
       lastOkAt: verified.catalog.updatedAt ?? catalog.updatedAt,
       lastError: null,

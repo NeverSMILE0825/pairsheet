@@ -18,7 +18,7 @@ import {
   totalUsd,
 } from "./format"
 import { applyGasFees, fetchEthReceipts, parseReceiptGas, type ReceiptGas } from "./gas-fees"
-import { AppError, fetchJson, mapPool, rpcBatch } from "./http"
+import { AppError, fetchJson, mapPool, rpcBatch, rpcCall } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
 import { resolvePool } from "./pool"
 import { quotePricesAt } from "./prices"
@@ -247,36 +247,34 @@ async function readPage(
   return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
 }
 
-async function readExplorerFallback(
-  chain: ChainConfig,
-  pool: PoolContext,
-  topic: string,
-  fromBlock: number | null,
-  toBlock: number | null,
-): Promise<PageResult> {
-  if (!chain.blockscout) {
-    return { logs: [], next: null }
+async function tipBlock(chain: ChainConfig): Promise<number> {
+  if (chain.rpcs.length === 0) return 0
+  try {
+    const raw = await rpcCall(chain.rpcs, "eth_blockNumber", [])
+    if (typeof raw !== "string") return 0
+    const block = Number.parseInt(raw, 16)
+    return Number.isFinite(block) && block > 0 ? block : 0
+  } catch {
+    return 0
   }
-  if (pool.topic1) {
-    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, fromBlock, toBlock)
-  }
-  return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
 }
 
-async function readRoutescan(
+type LogAttempt = { kind: "logs" | "empty"; logs: RawLog[] } | { kind: "error"; message: string }
+
+async function attemptRoutescan(
   chain: ChainConfig,
   pool: PoolContext,
   topic: string,
   page: number,
-  fromBlock: number | null = null,
-  toBlock: number | null = null,
-): Promise<PageResult> {
+  fromBlock: number | null,
+  toBlock: string,
+): Promise<LogAttempt> {
   const params = new URLSearchParams({
     module: "logs",
     action: "getLogs",
     address: pool.logAddress,
     fromBlock: fromBlock && fromBlock > 0 ? String(fromBlock) : "0",
-    toBlock: toBlock && toBlock > 0 ? String(toBlock) : "latest",
+    toBlock,
     topic0: topic,
     page: String(page),
     offset: String(ROUTESCAN_PAGE),
@@ -286,29 +284,103 @@ async function readRoutescan(
     params.set("topic0_1_opr", "and")
   }
   const url = `https://api.routescan.io/v2/network/mainnet/evm/${chain.chainId}/etherscan/api?${params}`
-  const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
-  if (!Array.isArray(body.result)) {
+  try {
+    const body = (await fetchJson(url)) as { status?: string; message?: string; result?: unknown }
+    if (Array.isArray(body.result)) {
+      return { kind: "logs", logs: body.result.map(routescanLog).filter((log): log is RawLog => log !== null) }
+    }
     const message = String(body.result || body.message || "no records")
-    if (/no records|no logs|chain not supported|invalid|result window is too large/i.test(message)) {
-      if (/chain not supported/i.test(message) && chain.blockscout) {
-        return readExplorerFallback(chain, pool, topic, fromBlock, toBlock)
-      }
-      // Page past the 10k cap with no rows — advance the fromBlock window using prior cursor if any.
-      return { logs: [], next: null }
+    if (/no records|no logs|invalid|result window is too large/i.test(message)) {
+      return { kind: "empty", logs: [] }
     }
-    // Routescan sometimes answers "An error occurred" for a pool it can index.
-    // The other explorer still has the logs.
-    if (chain.blockscout) {
-      try {
-        return await readExplorerFallback(chain, pool, topic, fromBlock, toBlock)
-      } catch {
-        throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
-      }
-    }
-    throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
+    return { kind: "error", message }
+  } catch (error) {
+    return { kind: "error", message: error instanceof Error ? error.message : "request failed" }
   }
-  const logs = body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
-  return { logs, next: nextLogPage("routescan", page, fromBlock, toBlock, logs) }
+}
+
+/**
+ * Routescan often answers "An error occurred" for a wide window (and always
+ * on page 3 of a 1,000-row offset). Retry the tip as "latest", then cut the
+ * block span in half until a query succeeds. `walkTo` is the real tip so a
+ * short slice is followed by the next slice instead of ending the tape.
+ */
+async function readRoutescan(
+  chain: ChainConfig,
+  pool: PoolContext,
+  topic: string,
+  page: number,
+  fromBlock: number | null = null,
+  toBlock: number | null = null,
+): Promise<PageResult> {
+  const walkTo = toBlock && toBlock > 0 ? toBlock : await tipBlock(chain)
+  return readRoutescanSpan(chain, pool, topic, page, fromBlock, walkTo, walkTo, 0)
+}
+
+async function readRoutescanSpan(
+  chain: ChainConfig,
+  pool: PoolContext,
+  topic: string,
+  page: number,
+  fromBlock: number | null,
+  queryTo: number,
+  walkTo: number,
+  depth: number,
+): Promise<PageResult> {
+  const floor = fromBlock && fromBlock > 0 ? fromBlock : 0
+  const capped = queryTo > 0 ? queryTo : walkTo
+  if (capped > 0 && floor > capped) {
+    return {
+      logs: [],
+      next: continueAfterWindow("routescan", page, fromBlock, capped, walkTo > 0 ? walkTo : null, []),
+    }
+  }
+
+  const targets = capped > 0 ? [String(capped)] : ["latest"]
+  if (depth === 0 && capped > 0 && capped === walkTo) targets.push("latest")
+
+  let failure = "An error occurred"
+  for (const target of targets) {
+    let attempt = await attemptRoutescan(chain, pool, topic, page, fromBlock, target)
+    if (attempt.kind === "error") attempt = await attemptRoutescan(chain, pool, topic, page, fromBlock, target)
+    if (attempt.kind === "error") {
+      failure = attempt.message
+      continue
+    }
+    return {
+      logs: attempt.logs,
+      next: continueAfterWindow(
+        "routescan",
+        page,
+        fromBlock,
+        capped > 0 ? capped : null,
+        walkTo > 0 ? walkTo : null,
+        attempt.logs,
+      ),
+    }
+  }
+
+  const span = capped - floor
+  if (span > 128 && depth < 24 && capped > floor) {
+    const mid = floor + Math.max(1, Math.floor(span / 2))
+    if (mid < capped) {
+      return readRoutescanSpan(chain, pool, topic, 1, floor > 0 ? floor : null, mid, walkTo, depth + 1)
+    }
+  }
+
+  if (depth === 0 && chain.blockscout) {
+    try {
+      const alt = await readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, page, fromBlock, capped > 0 ? capped : null)
+      return {
+        logs: alt.logs,
+        next: continueAfterWindow("blockscout", page, fromBlock, capped > 0 ? capped : null, walkTo > 0 ? walkTo : null, alt.logs),
+      }
+    } catch {
+      // Fall through to the same error the first explorer reported.
+    }
+  }
+
+  throw new AppError(`The chain explorer could not return logs (${failure}).`, 502)
 }
 
 async function readEtherscanLogs(
@@ -348,9 +420,11 @@ async function readEtherscanLogs(
 
 /**
  * Advance pagination for Etherscan-compatible getLogs.
- * Those APIs return oldest-first and cap page*offset at 10_000, so after page 10 we
- * continue by raising fromBlock to the newest block in the last page (inclusive —
- * callers dedupe by log id).
+ * Those APIs are oldest-first. Routescan answers "An error occurred" once a
+ * 1,000-row window reaches page 3 (about 2,000 logs), so a full page moves
+ * fromBlock to the newest block and starts again at page 1. Same-block
+ * leftovers are included again; callers dedupe by log id. A page that never
+ * leaves its current block keeps paging until the 10k ceiling.
  */
 export function nextLogPage(
   source: "routescan" | "blockscout",
@@ -361,6 +435,17 @@ export function nextLogPage(
 ): PageResult["next"] {
   if (logs.length === 0) return null
   if (logs.length < ROUTESCAN_PAGE) return null
+  const newest = Math.max(...logs.map((log) => log.blockNumber).filter((block) => block > 0))
+  const floor = fromBlock ?? 0
+  if (Number.isFinite(newest) && newest > floor) {
+    return {
+      source,
+      page: 1,
+      fromBlock: newest,
+      toBlock: toBlock ?? null,
+      blockscoutParams: null,
+    }
+  }
   if (page < MAX_LOG_PAGE) {
     return {
       source,
@@ -370,16 +455,33 @@ export function nextLogPage(
       blockscoutParams: null,
     }
   }
-  const newest = Math.max(...logs.map((log) => log.blockNumber).filter((block) => block > 0))
-  if (!Number.isFinite(newest) || newest <= 0) return null
-  // Inclusive: same-block leftovers are kept; exporter/getSwapPage dedupe by trade id.
-  return {
-    source,
-    page: 1,
-    fromBlock: newest,
-    toBlock: toBlock ?? null,
-    blockscoutParams: null,
+  return null
+}
+
+/**
+ * After a bounded slice, keep reading until `walkTo`. A short or empty slice
+ * that ends before the tip continues at the next block instead of stopping.
+ */
+export function continueAfterWindow(
+  source: "routescan" | "blockscout",
+  page: number,
+  fromBlock: number | null,
+  queryTo: number | null,
+  walkTo: number | null,
+  logs: RawLog[],
+): PageResult["next"] {
+  const next = nextLogPage(source, page, fromBlock, queryTo, logs)
+  if (next) return next
+  if (queryTo != null && walkTo != null && queryTo < walkTo) {
+    return {
+      source,
+      page: 1,
+      fromBlock: queryTo + 1,
+      toBlock: walkTo,
+      blockscoutParams: null,
+    }
   }
+  return null
 }
 
 function routescanLog(row: unknown): RawLog | null {

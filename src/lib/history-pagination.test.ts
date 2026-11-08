@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MAX_LOG_PAGE, ROUTESCAN_PAGE, mergeNewTrades, newestTradeBlock, nextLogPage, positiveSinceBlock } from "./history"
+import { MAX_LOG_PAGE, ROUTESCAN_PAGE, continueAfterWindow, mergeNewTrades, newestTradeBlock, nextLogPage, positiveSinceBlock } from "./history"
 import { signaturesUntilBlock } from "./solana"
 import type { Trade } from "./types"
 import type { RawLog } from "./types"
@@ -16,15 +16,22 @@ function logsInRange(from: number, count: number): RawLog[] {
   }))
 }
 
-test("nextLogPage keeps paging until the 10k explorer ceiling", () => {
-  const page = nextLogPage("routescan", 3, null, null, logsInRange(100, ROUTESCAN_PAGE))
+test("nextLogPage moves a full page to the newest block instead of page 3", () => {
+  const page = nextLogPage("routescan", 1, null, null, logsInRange(100, ROUTESCAN_PAGE))
   assert.deepEqual(page, {
     source: "routescan",
-    page: 4,
-    fromBlock: null,
+    page: 1,
+    fromBlock: 100 + ROUTESCAN_PAGE - 1,
     toBlock: null,
     blockscoutParams: null,
   })
+})
+
+test("nextLogPage keeps paging when every log is still in the current block", () => {
+  const logs = logsInRange(50, ROUTESCAN_PAGE).map((log) => ({ ...log, blockNumber: 50 }))
+  const page = nextLogPage("routescan", 1, 50, null, logs)
+  assert.equal(page?.page, 2)
+  assert.equal(page?.fromBlock, 50)
 })
 
 test("nextLogPage advances fromBlock after page 10 (oldest-first APIs)", () => {
@@ -40,12 +47,20 @@ test("nextLogPage stops on a short final page", () => {
   assert.equal(nextLogPage("routescan", 2, 100, null, logsInRange(500, 12)), null)
 })
 
-test("nextLogPage preserves an existing fromBlock while paging inside a window", () => {
+test("a short slice continues until the real tip", () => {
+  const next = continueAfterWindow("routescan", 1, 100, 500, 900, logsInRange(100, 3))
+  assert.equal(next?.page, 1)
+  assert.equal(next?.fromBlock, 501)
+  assert.equal(next?.toBlock, 900)
+  assert.equal(continueAfterWindow("routescan", 1, 800, 900, 900, logsInRange(800, 3)), null)
+})
+
+test("nextLogPage advances an existing window when the page reaches a newer block", () => {
   const page = nextLogPage("blockscout", 1, 26321361, null, logsInRange(26321361, ROUTESCAN_PAGE))
   assert.deepEqual(page, {
     source: "blockscout",
-    page: 2,
-    fromBlock: 26321361,
+    page: 1,
+    fromBlock: 26321361 + ROUTESCAN_PAGE - 1,
     toBlock: null,
     blockscoutParams: null,
   })
