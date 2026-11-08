@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-04"
+export const HELP_UPDATED_AT = "2026-11-08"
 
 export type HelpExample = {
   title: string
@@ -25,6 +25,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     bullets: [
       "Supported: Ethereum and major EVM L2s, plus Solana pools that DEXTools indexes.",
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
+      "Uniswap V4 is loaded from the pool id in the link. If a price index has not listed that pool yet, Pair Sheet reads the PoolManager Initialize event for the two tokens and still loads the tape. A regular pair whose index is missing falls back to the pool contract, then DexScreener.",
       "Busy pools past ~10k events keep loading: explorer getLogs caps each window at 10k, so Pair Sheet advances fromBlock and continues until the tape is complete (progress shows “Still reading the chain…”).",
       "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
       "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
@@ -34,6 +35,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Example URL",
         body: "https://www.dextools.io/app/ether/pair-explorer/0x961bde5165b921561e6e97fee8c2dfbdaf49c737",
+      },
+      {
+        title: "New Uniswap V4 pool",
+        body: "A V4 link whose pool id is not on GeckoTerminal yet still loads. Pair Sheet reads that pool’s Initialize log, names the two tokens, then walks swaps on the PoolManager. You do not wait for the price index to list it.",
       },
       {
         title: "Saved tape on an active pair",

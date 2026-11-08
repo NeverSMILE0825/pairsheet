@@ -1,5 +1,5 @@
 import type { ChainConfig } from "./chains"
-import { decodeAbiString, sameAddress } from "./decode"
+import { INIT_V4_TOPIC, decodeAbiString, sameAddress } from "./decode"
 import { formatUnits, marketCapFromPrice } from "./format"
 import { AppError, fetchJson, rpcCall } from "./http"
 import { isStableSymbol } from "./prices"
@@ -53,7 +53,7 @@ export async function resolvePool(
   address: string,
   dextoolsUrl: string,
 ): Promise<PoolContext> {
-  const gecko = await loadGecko(chain, address)
+  let gecko = await loadGecko(chain, address)
   const v4Hint = isPoolId(address) || /uniswap-v4|v4/i.test(gecko?.dexId || gecko?.dex || "")
   if (v4Hint) return resolveV4Pool(chain, address, dextoolsUrl, gecko)
 
@@ -75,6 +75,7 @@ export async function resolvePool(
     token0 = first
     token1 = second
   } catch (error) {
+    if (!gecko) gecko = await loadDexScreener(chain, address)
     if (gecko) {
       token0 = gecko.base
       token1 = gecko.quote
@@ -117,17 +118,24 @@ export async function resolvePool(
   }
 }
 
-function resolveV4Pool(
+async function resolveV4Pool(
   chain: ChainConfig,
   poolId: string,
   dextoolsUrl: string,
   gecko: GeckoPool | null,
-): PoolContext {
+): Promise<PoolContext> {
   if (!chain.v4PoolManager) {
     throw new AppError(
       `Uniswap V4 pools are not supported on ${chain.name} yet (no PoolManager mapped for this chain).`,
       422,
     )
+  }
+  if (!gecko) {
+    const [onchain, indexed] = await Promise.all([
+      loadV4PoolFromChain(chain, poolId),
+      loadDexScreener(chain, poolId),
+    ])
+    gecko = mergePoolMeta(onchain, indexed)
   }
   if (!gecko) {
     throw new AppError(
@@ -237,6 +245,264 @@ async function readDecimals(chain: ChainConfig, token: string): Promise<number> 
 
 function shortToken(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`
+}
+
+const NATIVE_SYMBOL: Record<string, string> = {
+  ether: "ETH",
+  base: "ETH",
+  arbitrum: "ETH",
+  optimism: "ETH",
+  linea: "ETH",
+  scroll: "ETH",
+  blast: "ETH",
+  zksync: "ETH",
+  unichain: "ETH",
+  worldchain: "ETH",
+  bnb: "BNB",
+  polygon: "POL",
+  avalanche: "AVAX",
+  celo: "CELO",
+  gnosis: "XDAI",
+  mantle: "MNT",
+  metis: "METIS",
+  chiliz: "CHZ",
+}
+
+/** DexScreener chain slug. DefiLlama ids are not always the same. */
+const DEXSCREENER_SLUG: Record<string, string> = {
+  solana: "solana",
+  ether: "ethereum",
+  bnb: "bsc",
+  polygon: "polygon",
+  base: "base",
+  arbitrum: "arbitrum",
+  optimism: "optimism",
+  avalanche: "avalanche",
+  linea: "linea",
+  scroll: "scroll",
+  blast: "blast",
+  zksync: "zksync",
+  celo: "celo",
+  unichain: "unichain",
+  worldchain: "worldchain",
+  gnosis: "gnosis",
+  mantle: "mantle",
+  metis: "metis",
+  chiliz: "chiliz",
+}
+
+const DEX_NATIVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+/** Currency address indexed in a Uniswap V4 Initialize topic. */
+export function addressFromTopic(topic: string): string | null {
+  const hex = topic.toLowerCase().replace(/^0x/, "")
+  if (!/^[0-9a-f]{64}$/.test(hex)) return null
+  return `0x${hex.slice(24)}`
+}
+
+/** token0 and token1 from a PoolManager Initialize log. */
+export function currenciesFromV4Initialize(
+  topics: readonly string[] | undefined,
+): { token0: string; token1: string } | null {
+  if (!topics || topics.length < 4) return null
+  if ((topics[0] || "").toLowerCase() !== INIT_V4_TOPIC) return null
+  const token0 = addressFromTopic(topics[2] || "")
+  const token1 = addressFromTopic(topics[3] || "")
+  if (!token0 || !token1) return null
+  return { token0, token1 }
+}
+
+function nativeSymbol(chain: ChainConfig): string {
+  return NATIVE_SYMBOL[chain.id] || "ETH"
+}
+
+function normalizeTokenAddress(address: string): string {
+  const value = address.trim().toLowerCase()
+  if (!value || value === DEX_NATIVE || value === "native" || value === "eth") return NATIVE
+  return value
+}
+
+/**
+ * Keep the on-chain pair when both sources exist. Fill price and a missing
+ * symbol from the indexer.
+ */
+function mergePoolMeta(onchain: GeckoPool | null, indexed: GeckoPool | null): GeckoPool | null {
+  if (!onchain) return indexed
+  if (!indexed) return onchain
+  return {
+    ...onchain,
+    base: preferSymbol(onchain.base, indexed),
+    quote: preferSymbol(onchain.quote, indexed),
+    priceUsd: onchain.priceUsd ?? indexed.priceUsd,
+    reserveUsd: onchain.reserveUsd ?? indexed.reserveUsd,
+    createdAt: onchain.createdAt ?? indexed.createdAt,
+    baseTotalSupply: onchain.baseTotalSupply ?? indexed.baseTotalSupply,
+  }
+}
+
+function preferSymbol(token: TokenInfo, indexed: GeckoPool): TokenInfo {
+  const known = [indexed.base, indexed.quote].find((item) => sameAddress(item.address, token.address))
+  if (!known?.symbol || !token.symbol.includes("…")) return token
+  return { ...token, symbol: known.symbol }
+}
+
+async function loadV4PoolFromChain(chain: ChainConfig, poolId: string): Promise<GeckoPool | null> {
+  if (!chain.v4PoolManager) return null
+  const topics = await findV4InitializeTopics(chain, poolId)
+  const currencies = currenciesFromV4Initialize(topics)
+  if (!currencies) return null
+  const [token0, token1] = await Promise.all([
+    describeToken(chain, currencies.token0),
+    describeToken(chain, currencies.token1),
+  ])
+  const sides = pickSides(token0, token1, null)
+  const baseTotalSupply = await resolveTokenTotalSupply(chain, sides.base.address).catch(() => null)
+  return {
+    base: sides.base,
+    quote: sides.quote,
+    dex: "Uniswap V4",
+    dexId: "uniswap-v4",
+    createdAt: null,
+    priceUsd: null,
+    reserveUsd: null,
+    baseTotalSupply,
+  }
+}
+
+async function findV4InitializeTopics(chain: ChainConfig, poolId: string): Promise<string[] | undefined> {
+  const id = poolId.toLowerCase()
+  for (const url of v4InitLogUrls(chain, id)) {
+    try {
+      const body = (await fetchJson(url)) as { result?: unknown }
+      const topics = topicsFromExplorerLogs(body.result)
+      if (topics) return topics
+    } catch {
+      continue
+    }
+  }
+  if (chain.rpcs.length === 0 || !chain.v4PoolManager) return undefined
+  try {
+    const result = await rpcCall(chain.rpcs, "eth_getLogs", [
+      {
+        address: chain.v4PoolManager,
+        topics: [INIT_V4_TOPIC, id],
+        fromBlock: "0x0",
+        toBlock: "latest",
+      },
+    ])
+    return topicsFromExplorerLogs(result)
+  } catch {
+    return undefined
+  }
+}
+
+function v4InitLogUrls(chain: ChainConfig, poolId: string): string[] {
+  if (!chain.v4PoolManager) return []
+  const params = new URLSearchParams({
+    module: "logs",
+    action: "getLogs",
+    address: chain.v4PoolManager,
+    fromBlock: "0",
+    toBlock: "latest",
+    topic0: INIT_V4_TOPIC,
+    topic1: poolId,
+    topic0_1_opr: "and",
+    page: "1",
+    offset: "1",
+  })
+  const urls: string[] = []
+  if (chain.routescan) {
+    urls.push(`https://api.routescan.io/v2/network/mainnet/evm/${chain.chainId}/etherscan/api?${params}`)
+  }
+  if (chain.blockscout) {
+    urls.push(`${chain.blockscout.replace(/\/$/, "")}/api?${params}`)
+  }
+  return urls
+}
+
+function topicsFromExplorerLogs(result: unknown): string[] | undefined {
+  const rows = Array.isArray(result) ? result : []
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue
+    const topics = (row as { topics?: unknown }).topics
+    if (!Array.isArray(topics) || !topics.every((topic) => typeof topic === "string")) continue
+    if (currenciesFromV4Initialize(topics)) return topics
+  }
+  return undefined
+}
+
+async function loadDexScreener(chain: ChainConfig, address: string): Promise<GeckoPool | null> {
+  const slug = DEXSCREENER_SLUG[chain.id]
+  if (!slug) return null
+  try {
+    const body = await fetchJson(`https://api.dexscreener.com/latest/dex/pairs/${slug}/${address}`)
+    const pair = firstDexPair(body)
+    if (!pair) return null
+    const baseRaw = dexToken(pair.baseToken)
+    const quoteRaw = dexToken(pair.quoteToken)
+    if (!baseRaw || !quoteRaw) return null
+    const [base, quote] = await Promise.all([
+      describeToken(chain, baseRaw.address, baseRaw.symbol),
+      describeToken(chain, quoteRaw.address, quoteRaw.symbol),
+    ])
+    const attributes = {
+      base_token_price_usd: pair.priceUsd,
+      fdv_usd: pair.fdv,
+    }
+    const fromToken = await resolveTokenTotalSupply(chain, base.address).catch(() => null)
+    const created = Number(pair.pairCreatedAt)
+    const liquidity = pair.liquidity && typeof pair.liquidity === "object" ? (pair.liquidity as { usd?: unknown }).usd : null
+    const dexId = String(pair.dexId || "")
+    return {
+      base,
+      quote,
+      dex: dexLabel(dexId),
+      dexId,
+      createdAt: Number.isFinite(created) && created > 0 ? new Date(created).toISOString() : null,
+      priceUsd: pair.priceUsd != null && String(pair.priceUsd) !== "" ? String(pair.priceUsd) : null,
+      reserveUsd: liquidity != null && String(liquidity) !== "" ? String(liquidity) : null,
+      baseTotalSupply: pickBaseTotalSupply(fromToken, supplyFromFdv(attributes)),
+    }
+  } catch {
+    return null
+  }
+}
+
+function dexLabel(dexId: string): string {
+  if (/uniswap/i.test(dexId) && /v4/i.test(dexId)) return "Uniswap V4"
+  if (/uniswap/i.test(dexId)) return "Uniswap"
+  return dexId || "DEX"
+}
+
+function firstDexPair(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== "object") return null
+  const record = body as { pairs?: unknown; pair?: unknown }
+  if (Array.isArray(record.pairs) && record.pairs[0] && typeof record.pairs[0] === "object") {
+    return record.pairs[0] as Record<string, unknown>
+  }
+  if (record.pair && typeof record.pair === "object") return record.pair as Record<string, unknown>
+  return null
+}
+
+function dexToken(value: unknown): { address: string; symbol: string } | null {
+  if (!value || typeof value !== "object") return null
+  const row = value as { address?: unknown; symbol?: unknown }
+  const address = String(row.address || "").trim()
+  if (!address) return null
+  return { address, symbol: String(row.symbol || "").trim() }
+}
+
+async function describeToken(chain: ChainConfig, address: string, symbolHint?: string): Promise<TokenInfo> {
+  const normalized = normalizeTokenAddress(address)
+  if (isNativeToken(normalized)) {
+    const hinted = symbolHint && !/^0x/i.test(symbolHint) ? symbolHint : ""
+    return { address: NATIVE, symbol: hinted || nativeSymbol(chain), decimals: 18 }
+  }
+  const [symbol, decimals] = await Promise.all([
+    symbolHint ? Promise.resolve(symbolHint) : readSymbol(chain, normalized),
+    readDecimals(chain, normalized),
+  ])
+  return { address: normalized, symbol: symbol || shortToken(normalized), decimals }
 }
 
 async function loadGecko(chain: ChainConfig, address: string): Promise<GeckoPool | null> {

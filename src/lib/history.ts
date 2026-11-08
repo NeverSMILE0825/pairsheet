@@ -247,6 +247,22 @@ async function readPage(
   return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
 }
 
+async function readExplorerFallback(
+  chain: ChainConfig,
+  pool: PoolContext,
+  topic: string,
+  fromBlock: number | null,
+  toBlock: number | null,
+): Promise<PageResult> {
+  if (!chain.blockscout) {
+    return { logs: [], next: null }
+  }
+  if (pool.topic1) {
+    return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, fromBlock, toBlock)
+  }
+  return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
+}
+
 async function readRoutescan(
   chain: ChainConfig,
   pool: PoolContext,
@@ -275,13 +291,19 @@ async function readRoutescan(
     const message = String(body.result || body.message || "no records")
     if (/no records|no logs|chain not supported|invalid|result window is too large/i.test(message)) {
       if (/chain not supported/i.test(message) && chain.blockscout) {
-        if (pool.topic1) {
-          return readEtherscanLogs(chain.blockscout.replace(/\/$/, ""), pool, topic, 1, fromBlock, toBlock)
-        }
-        return readBlockscout(chain.blockscout, pool.logAddress, topic, null)
+        return readExplorerFallback(chain, pool, topic, fromBlock, toBlock)
       }
       // Page past the 10k cap with no rows — advance the fromBlock window using prior cursor if any.
       return { logs: [], next: null }
+    }
+    // Routescan sometimes answers "An error occurred" for a pool it can index.
+    // The other explorer still has the logs.
+    if (chain.blockscout) {
+      try {
+        return await readExplorerFallback(chain, pool, topic, fromBlock, toBlock)
+      } catch {
+        throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
+      }
     }
     throw new AppError(`The chain explorer could not return logs (${message}).`, 502)
   }
