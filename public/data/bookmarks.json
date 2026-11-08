@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-08T09:23:02.415Z",
+  "updatedAt": "2026-11-08T09:23:11.891Z",
   "bookmarks": [
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
@@ -68,19 +68,6 @@
       "starred": true
     },
     {
-      "id": "ether:0xffd41513dff8f09edf8dec08790a1f41c1e6e8ee",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0xffd41513dff8f09edf8dec08790a1f41c1e6e8ee",
-      "savedAt": "2026-10-31T18:23:04.520Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0xffd41513dff8f09edf8dec08790a1f41c1e6e8ee",
-      "dex": "Uniswap V2",
-      "baseSymbol": "SNOWMOON",
-      "quoteSymbol": "WETH",
-      "tradeCount": 1389,
-      "starred": false
-    },
-    {
       "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
       "savedAt": "2026-10-30T09:01:39.118Z",
@@ -92,6 +79,19 @@
       "quoteSymbol": "ETH",
       "tradeCount": 4477,
       "starred": true
+    },
+    {
+      "id": "ether:0x68d0f728402fedfa5e7ea5edb80049abf33d27c7",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x68d0f728402fedfa5e7ea5edb80049abf33d27c7?maker=0x4b335333bee34f3d84ccf5f04d79501b64d591e9",
+      "savedAt": "2026-10-29T16:40:04.202Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x68d0f728402fedfa5e7ea5edb80049abf33d27c7",
+      "dex": "Uniswap V3",
+      "baseSymbol": "ETH",
+      "quoteSymbol": "WETH",
+      "tradeCount": 650,
+      "starred": false
     }
   ]
 }
