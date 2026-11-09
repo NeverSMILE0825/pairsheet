@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-09T01:54:43.399Z",
+  "updatedAt": "2026-11-09T01:54:56.580Z",
   "bookmarks": [
     {
       "id": "ether:0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
-      "savedAt": "2026-11-09T01:54:37.329Z",
+      "savedAt": "2026-11-09T01:54:45.193Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
       "dex": "Uniswap V4",
       "baseSymbol": "DACITY",
       "quoteSymbol": "ETH",
-      "tradeCount": 15180,
-      "starred": false
+      "tradeCount": 15183,
+      "starred": true
     },
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
