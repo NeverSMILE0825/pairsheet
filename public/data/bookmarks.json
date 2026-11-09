@@ -1,31 +1,31 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-09T01:56:19.454Z",
+  "updatedAt": "2026-11-09T23:42:05.195Z",
   "bookmarks": [
-    {
-      "id": "ether:0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
-      "savedAt": "2026-11-09T01:56:17.513Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
-      "dex": "Uniswap V4",
-      "baseSymbol": "DACITY",
-      "quoteSymbol": "ETH",
-      "tradeCount": 15185,
-      "starred": true
-    },
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
-      "savedAt": "2026-11-09T01:49:41.260Z",
+      "savedAt": "2026-11-09T23:42:03.095Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
       "dex": "Uniswap V4 (Ethereum)",
       "baseSymbol": "GTA",
       "quoteSymbol": "ETH",
-      "tradeCount": 4762,
+      "tradeCount": 5237,
+      "starred": true
+    },
+    {
+      "id": "ether:0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
+      "savedAt": "2026-11-09T04:01:19.729Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0x443788ef13a2108291a44c60537d62a107042e52e0440152053af7a54d52c9cb",
+      "dex": "Uniswap V4",
+      "baseSymbol": "DACITY",
+      "quoteSymbol": "ETH",
+      "tradeCount": 15528,
       "starred": true
     },
     {
