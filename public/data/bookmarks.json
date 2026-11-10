@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-09T23:42:14.230Z",
+  "updatedAt": "2026-11-10T01:24:31.028Z",
   "bookmarks": [
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
-      "savedAt": "2026-11-09T23:42:12.998Z",
+      "savedAt": "2026-11-10T01:24:29.105Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
       "dex": "Uniswap V4 (Ethereum)",
       "baseSymbol": "GTA",
       "quoteSymbol": "ETH",
-      "tradeCount": 5237,
+      "tradeCount": 5318,
       "starred": true
     },
     {
