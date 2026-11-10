@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-10T01:25:52.445Z",
+  "updatedAt": "2026-11-10T01:25:59.345Z",
   "bookmarks": [
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
@@ -78,19 +78,6 @@
       "baseSymbol": "HYPEPE",
       "quoteSymbol": "ETH",
       "tradeCount": 5661,
-      "starred": true
-    },
-    {
-      "id": "ether:0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "url": "https://www.dextools.io/app/ether/pair-explorer/0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "savedAt": "2026-10-30T09:01:39.118Z",
-      "chainId": "ether",
-      "chainName": "Ethereum",
-      "address": "0x80bcdfbd84b4e2525f71b36b82440f0d435ecebabefb1d286b6fe16a87c67f96",
-      "dex": "Uniswap V4 (Ethereum)",
-      "baseSymbol": "GINNAN",
-      "quoteSymbol": "ETH",
-      "tradeCount": 4477,
       "starred": true
     }
   ]
