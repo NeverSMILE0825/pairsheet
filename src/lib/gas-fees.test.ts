@@ -6,10 +6,13 @@ import {
   countMissingGas,
   formatEth4,
   formatGasPriceGwei,
+  formatGasUsd,
+  gasFeeUsd,
   mergeGasFees,
   normalizeGasPriceString,
   normalizeTradeGasFormats,
   parseReceiptGas,
+  totalGasSpend,
   tradesNeedGasRepair,
 } from "./gas-fees"
 import type { Trade } from "./types"
@@ -47,6 +50,23 @@ test("formats gwei and eth with fixed decimals", () => {
   assert.equal(formatGasPriceGwei(413_400_000n), "0.413")
   assert.equal(formatEth4(250_000_000_000_000n), "0.0003")
   assert.equal(formatEth4(1_000_000_000_000_000n), "0.0010")
+})
+
+test("gas usd is the receipt fee times the ETH price, and each tx counts once", () => {
+  assert.equal(formatGasUsd(gasFeeUsd("8505000000000", 2117)), "$0.018")
+  const total = totalGasSpend(
+    [
+      { txHash: "0xaa", gasFeeWei: "8505000000000", totalUsd: null, quoteAmount: "0" },
+      { txHash: "0xaa", gasFeeWei: "8505000000000", totalUsd: null, quoteAmount: "0" },
+      { txHash: "0xbb", gasFeeWei: "10000000000000000", totalUsd: "20", quoteAmount: "0.01" },
+    ],
+    "ETH",
+    2117,
+  )
+  assert.equal(total.txCount, 2)
+  assert.equal(total.missing, 0)
+  assert.equal(total.wei, 8505000000000n + 10000000000000000n)
+  assert.equal(formatGasUsd(total.usd), "$20.018")
 })
 
 test("parses receipt gas fields", () => {

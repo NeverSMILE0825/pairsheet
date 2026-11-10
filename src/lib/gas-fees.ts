@@ -1,3 +1,4 @@
+import { formatScaled } from "./format"
 import { mapPool, rpcBatch, rpcSingle, sleep } from "./http"
 import type { Trade } from "./types"
 
@@ -146,6 +147,109 @@ export function assignGasFeeTotals(trades: Trade[]): Trade[] {
     gasFeeWei: trade.gasFeeWei ?? null,
     gasFeeTotalEth: totals.get(trade.id) ?? null,
   }))
+}
+
+/** USD value of an exact tx fee (wei × ETH price). Null when the fee or price is missing. */
+export function gasFeeUsd(wei: string | null | undefined, ethUsd: number | null | undefined): string | null {
+  if (!wei || !/^\d+$/.test(wei) || ethUsd == null || !(ethUsd > 0)) return null
+  const priceScale = 8
+  const priceInt = BigInt(Math.round(ethUsd * 10 ** priceScale))
+  if (priceInt <= 0n) return null
+  const denom = 10n ** 18n
+  const numer = BigInt(wei) * priceInt
+  const rounded = (numer + denom / 2n) / denom
+  return formatScaled(rounded, priceScale)
+}
+
+/** GMGN-style dollars: 3 decimals under $100, otherwise cents. */
+export function formatGasUsd(amount: string | null | undefined): string {
+  if (!amount) return "—"
+  const value = Number(amount)
+  if (!Number.isFinite(value)) return "—"
+  if (value === 0) return "$0"
+  const digits = value < 100 ? 3 : 2
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
+
+/**
+ * ETH/USD implied by a row when the quote token is ETH. That is the same price
+ * the tape used for Total, so Gas matches the row’s own moment.
+ */
+export function historicalNativeUsd(
+  quoteSymbol: string,
+  totalUsd: string | null | undefined,
+  quoteAmount: string | null | undefined,
+): number | null {
+  if (!/^(ETH|WETH)$/i.test(quoteSymbol)) return null
+  if (!totalUsd || !quoteAmount) return null
+  const total = Number(totalUsd)
+  const quote = Number(quoteAmount)
+  if (!(total > 0) || !(quote > 0)) return null
+  const unit = total / quote
+  return Number.isFinite(unit) && unit > 0 ? unit : null
+}
+
+export function rowGasUsd(
+  trade: { gasFeeWei: string | null; totalUsd: string | null; quoteAmount: string },
+  quoteSymbol: string,
+  liveEthUsd: number | null,
+): string | null {
+  return gasFeeUsd(trade.gasFeeWei, historicalNativeUsd(quoteSymbol, trade.totalUsd, trade.quoteAmount) ?? liveEthUsd)
+}
+
+export type GasSpend = {
+  /** Unique transactions that had a receipt fee. */
+  txCount: number
+  /** Loaded rows whose transaction had no fee yet. */
+  missing: number
+  wei: bigint
+  usd: string | null
+}
+
+/** Sum each transaction once. Two pool events in one tx pay gas one time. */
+export function totalGasSpend(
+  trades: { txHash: string; gasFeeWei: string | null; totalUsd: string | null; quoteAmount: string }[],
+  quoteSymbol: string,
+  liveEthUsd: number | null,
+): GasSpend {
+  const seen = new Set<string>()
+  const missingHashes = new Set<string>()
+  let wei = 0n
+  let usdScaled = 0n
+  let priced = 0
+  let txCount = 0
+  for (const trade of trades) {
+    const hash = trade.txHash.toLowerCase()
+    if (seen.has(hash) || missingHashes.has(hash)) continue
+    if (!trade.gasFeeWei || !/^\d+$/.test(trade.gasFeeWei)) {
+      missingHashes.add(hash)
+      continue
+    }
+    seen.add(hash)
+    txCount += 1
+    wei += BigInt(trade.gasFeeWei)
+    const usd = rowGasUsd(trade, quoteSymbol, liveEthUsd)
+    if (usd) {
+      const parsed = splitUsd8(usd)
+      if (parsed !== null) {
+        usdScaled += parsed
+        priced += 1
+      }
+    }
+  }
+  return {
+    txCount,
+    missing: missingHashes.size,
+    wei,
+    usd: priced > 0 ? formatScaled(usdScaled, 8) : null,
+  }
+}
+
+function splitUsd8(amount: string): bigint | null {
+  const match = amount.match(/^(\d+)(?:\.(\d+))?$/)
+  if (!match) return null
+  const fraction = (match[2] ?? "").padEnd(8, "0").slice(0, 8)
+  return BigInt(match[1] + fraction)
 }
 
 export function ethFromWei(wei: bigint): string {

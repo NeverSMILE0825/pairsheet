@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-08"
+export const HELP_UPDATED_AT = "2026-11-09"
 
 export type HelpExample = {
   title: string
@@ -29,7 +29,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Busy pools keep loading past the first pages. The explorer errors around 2,000 logs, and sometimes on a wide block range, so Pair Sheet continues from the newest block already read and retries a smaller range until the tape is complete (progress shows “Still reading the chain…”).",
       "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
       "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
-      "Once a tape is open, Pair Sheet keeps watching the chain (about every 12 seconds) and appends swaps newer than the newest row. A saved snapshot catches up by itself — you do not press Load swaps again. The Transactions card shows Live, or Updating… while it is reading. If this browser already saved the pair, the longer tape is written back locally.",
+      "Update, beside Load swaps, appends swaps newer than the open tape. Open a saved pair, then click Update to pull the latest rows without reading the whole history again.",
+      "Live, beside Load swaps, turns real-time updates on or off. On: Pair Sheet checks the chain about every 12 seconds and appends new swaps. Off: the tape stays still until you press Update. This browser remembers the choice. The Transactions card shows Live, or Updating… while a check is running. If this browser already saved the pair, the longer tape is written back locally.",
     ],
     examples: [
       {
@@ -42,7 +43,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         title: "Saved tape on an active pair",
-        body: "GTA6 saved at 14,045 txs while DEXTools now shows 16.31K. Open the snapshot: the count climbs toward the chain total on its own, and the local save is updated. Load swaps is only needed for a first-time read or a full reload.",
+        body: "GTA6 saved at 14,045 txs while DEXTools now shows 16.31K. Open the snapshot and click Update, or leave Live on so the count climbs on its own. The local save is updated. Load swaps is only needed for a first-time read or a full reload.",
       },
       {
         title: "Pools with 10k+ trades",
@@ -62,13 +63,15 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Price (USD) / Total use DefiLlama historical quote prices × the quote-token amount (or, for one-sided Uniswap V4 adds, base × the pool’s init price). Small USD differences vs DEXTools come from their ETH/USD feed, not from token amounts.",
       "Very small prices show as 0.0₈123 — the yellow bold subscript digit is how many zeros sit after the decimal (slightly larger than plain Unicode subscripts so it stays readable).",
       "M. Cap is unit price × the base token’s total supply (Gecko normalized_total_supply / on-chain totalSupply). Pool FDV ÷ price is only a last-resort fallback — Gecko’s pool FDV is often wrong on Uniswap V4 and would inflate Max/Min (e.g. GROKLET Max ~$12M instead of ~$508K).",
+      "Pooled ETH (or the quote token) estimates market cap at another pool size. It uses the latest row as the anchor: that row’s pooled amount shows that row’s M. Cap, and a different amount scales with the square. Double the pooled ETH and the estimate is 4× the latest M. Cap.",
       "Add / Remove in the header counts only ADD and REMOVE rows — Init is separate (same as DEXTools’ INIT vs ADD).",
       "Uniswap V4: Init is the Initialize event (price from sqrtPriceX96, amounts 0). Add/Remove token amounts use liquidity math (ticks + sqrtPrice) so a one-sided add shows 0 quote — matching DEXTools — instead of counting bundled swap transfers in the same tx.",
       "Quote column (WETH/ETH) always shows 4 decimals (0.5 → 0.5000); zero stays 0. Pool quote uses the same formatting.",
       "MEV / bot: Detect MEV bots (left of Columns) filters to DEXTools-style front-running. A red robot sits after the quote (ETH/WETH) amount when the same maker buys and sells in the same second — or with the same token amount within 30 seconds. Tooltip shows drained ETH (|buy quote − sell quote|). Ordinary round-trips minutes apart are not marked.",
       "Pool columns are actual token balances after that event (V2 Sync, V3 balances, V4 running ADD/BUY/SELL ledger). V4 never shows virtual L/√P reserves — those looked like ~1 ETH on GINNAN even when no ETH was added.",
       "Holders = unique wallets with a non-zero base-token balance right after that row (pair contract, Uniswap V4 PoolManager, and burn addresses excluded). Only filled when “Look up Holders” is checked. Counts jump between consecutive swaps when many wallets are drained or transferred in the blocks between those rows — that is on-chain state, not a chart bug.",
-      "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
+      "Gas Price = effective gas price in gwei (3 decimals) from the receipt. Gas, between Gas Price and Gas Fee Total, is that transaction’s fee in USD (gas used × effective gas price × ETH price) — the same figure GMGN shows. Gas Fee Total = running ETH spend of unique txs through this row (4 decimals). Only filled when “Look up Gas Price / Gas Fee Total” is checked.",
+      "Total Gas, on the table-view bar, adds every loaded transaction once and shows the pair’s spend in USD and ETH. Two pool events in one transaction count as one fee.",
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
@@ -91,6 +94,10 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: "After a one-sided Add of only GINNAN, Pool ETH is 0. The first buy of 0.0464 ETH makes Pool ETH ≈ 0.0464 — not ~1.05 from virtual liquidity math.",
       },
       {
+        title: "Gas column vs GMGN",
+        body: "A swap that used 189,000 gas at 0.045 gwei paid 0.000008505 ETH. At $2,117 per ETH the Gas column shows $0.018. Total Gas adds each transaction once, so the pair’s whole tape is one number in USD and ETH.",
+      },
+      {
         title: "High Gas Price vs gas tracker",
         body: "On Oct 26 16:12:59 EDT a GINNAN sell paid 28.562 gwei effective while the block base fee was ~0.046 gwei — the sender set a 28.562 gwei priority tip. Pair Sheet shows the receipt value; the gas tracker only plots base-fee averages.",
       },
@@ -109,6 +116,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Holders cliff between two swaps",
         body: "GROKLET No. 2613 → 2614: Holders can fall from ~400 to ~5 in one row because ERC-20 Transfers between those blocks wiped most wallets. DEXTools’ end state (~4 holders) matches the late rows; Pair Sheet only samples holder count at swap times.",
+      },
+      {
+        title: "M. Cap at another pooled ETH",
+        body: "The latest row has 4.2 ETH in the pool and M. Cap $200,000. Type 8.4. Estimated M. Cap is $800,000 (4×). Type 4.2 again and it matches the latest row.",
       },
       {
         title: "M. Cap vs DEXTools",

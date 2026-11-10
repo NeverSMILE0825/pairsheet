@@ -17,6 +17,7 @@ export type TxColumnId =
   | "quoteReserve"
   | "holders"
   | "gasPriceGwei"
+  | "gasUsd"
   | "gasFeeTotalEth"
   | "maker"
   | "fundedBy"
@@ -61,6 +62,7 @@ export const TX_COLUMN_DEFS: ColumnDef<TxColumnId>[] = [
   { id: "quoteReserve", label: "Pool quote" },
   { id: "holders", label: "Holders" },
   { id: "gasPriceGwei", label: "Gas Price" },
+  { id: "gasUsd", label: "Gas" },
   { id: "gasFeeTotalEth", label: "Gas Fee Total" },
   { id: "maker", label: "Maker / Txns" },
   { id: "fundedBy", label: "Funded by" },

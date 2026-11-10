@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, RefreshCw, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
 import { MevBotIcon } from "@/components/mev-bot-icon"
 import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { getChain } from "@/lib/chains"
-import { assignGasFeeTotals, countMissingGas, repairTradeGas, tradesNeedGasRepair } from "@/lib/gas-fees"
+import { assignGasFeeTotals, countMissingGas, ethFromWei, formatGasUsd, repairTradeGas, rowGasUsd, totalGasSpend, tradesNeedGasRepair } from "@/lib/gas-fees"
 import {
   DA_COLUMN_DEFS,
   TX_COLUMN_DEFS,
@@ -54,11 +54,13 @@ import {
   shortAddress,
   sumDecimals,
 } from "@/lib/format"
+import { describeMcapMultiple, latestPoolMcapAnchor, marketCapAtPooledQuote, normalizePooledQuote, trimDecimal } from "@/lib/mcap-pool"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { summarizeTrades } from "@/lib/trade-stats"
 import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trade-size"
 import { IntervalChartDialog } from "@/components/interval-chart"
 import { LiveMarketWidgets } from "@/components/live-market"
+import { fetchEthSnap } from "@/lib/live-market"
 import {
   LAUNCH_PRESETS,
   describeLaunchWindow,
@@ -143,6 +145,7 @@ const ZONE_KEY = "pairsheet.timezone"
 const LOOKUP_FUNDERS_KEY = "pairsheet.lookupFunders"
 const LOOKUP_GAS_KEY = "pairsheet.lookupGas"
 const LOOKUP_HOLDERS_KEY = "pairsheet.lookupHolders"
+const LIVE_ENABLED_KEY = "pairsheet.liveUpdates"
 const PAGE_SIZES = [25, 50, 100, 250]
 const WALLET_BATCH = 12
 const WALLET_ROUTER_LIMIT = 120
@@ -200,6 +203,7 @@ type SortKey =
   | "makerTxCount"
   | "fundedBy"
   | "gasPriceGwei"
+  | "gasUsd"
   | "gasFeeTotalEth"
 
 type MinuteSortKey =
@@ -255,6 +259,8 @@ export function Exporter() {
   const [url, setUrl] = useState("")
   const [phase, setPhase] = useState<Phase>("idle")
   const [liveMode, setLiveMode] = useState<"off" | "updating" | "live">("off")
+  const [liveEnabled, setLiveEnabled] = useState(true)
+  const [manualUpdating, setManualUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [pool, setPool] = useState<PoolView | null>(null)
@@ -306,6 +312,9 @@ export function Exporter() {
   } | null>(null)
   const run = useRef(0)
   const tradesRef = useRef<Trade[]>([])
+  const liveEnabledRef = useRef(true)
+  const catchUpLock = useRef(false)
+  const liveGeneration = useRef(0)
   const savedUpdateJob = useRef<{
     token: number
     url: string
@@ -344,6 +353,10 @@ export function Exporter() {
   const [periodError, setPeriodError] = useState<string | null>(null)
   const [launchFrom, setLaunchFrom] = useState("")
   const [launchTo, setLaunchTo] = useState("")
+  const [pooledInput, setPooledInput] = useState("")
+  const [pooledEdited, setPooledEdited] = useState(false)
+  const [ethUsd, setEthUsd] = useState<number | null>(null)
+  const [showTotalGas, setShowTotalGas] = useState(false)
   const [fromNo, setFromNo] = useState("")
   const [toNo, setToNo] = useState("")
   const [noError, setNoError] = useState<string | null>(null)
@@ -372,12 +385,40 @@ export function Exporter() {
       setLookupFunders(window.localStorage.getItem(LOOKUP_FUNDERS_KEY) === "1")
       setLookupGas(window.localStorage.getItem(LOOKUP_GAS_KEY) === "1")
       setLookupHolders(window.localStorage.getItem(LOOKUP_HOLDERS_KEY) === "1")
+      if (window.localStorage.getItem(LIVE_ENABLED_KEY) === "0") setLiveEnabled(false)
     } catch {
       setLookupFunders(false)
       setLookupGas(false)
       setLookupHolders(false)
     }
   }, [])
+
+  useEffect(() => {
+    setPooledEdited(false)
+    setPooledInput("")
+    setShowTotalGas(false)
+  }, [pool?.address])
+
+  useEffect(() => {
+    if (!pool || pool.chainId !== "ether") {
+      setEthUsd(null)
+      return
+    }
+    let stopped = false
+    const load = () => {
+      fetchEthSnap()
+        .then((snap) => {
+          if (!stopped) setEthUsd(snap.priceUsd)
+        })
+        .catch(() => undefined)
+    }
+    load()
+    const timer = window.setInterval(load, 60_000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [pool?.chainId])
 
   useEffect(() => {
     void (async () => {
@@ -414,6 +455,7 @@ export function Exporter() {
   }, [blacklistKey, blacklistKeyLoaded, blacklistIds])
 
   tradesRef.current = rawTrades
+  liveEnabledRef.current = liveEnabled
   liveApi.current = {
     url,
     pool,
@@ -426,73 +468,30 @@ export function Exporter() {
   }
 
   useEffect(() => {
-    if (phase !== "done" || !pool || rawTrades.length === 0 || !url.trim()) {
-      setLiveMode("off")
+    if (!liveEnabled || phase !== "done" || !pool || rawTrades.length === 0 || !url.trim()) {
+      if (!catchUpLock.current) setLiveMode("off")
       return
     }
-    let stopped = false
+    const generation = liveGeneration.current + 1
+    liveGeneration.current = generation
     let timer = 0
-    const watchUrl = url.trim()
-    const watchAddress = pool.address
+    const stopped = () => liveGeneration.current !== generation
 
     async function tick() {
-      if (stopped) return
-      const api = liveApi.current
-      if (!api.pool || api.pool.address !== watchAddress || api.url.trim() !== watchUrl) return
-      const since = newestTradeBlock(tradesRef.current)
-      if (!since) return
-      setLiveMode("updating")
-      let cursor: string | null = null
-      let added = 0
-      const wantGas = api.lookupGas || tradesRef.current.some((trade) => trade.gasPriceGwei)
-      try {
-        do {
-          if (stopped) return
-          const body = await getSwapPage(watchUrl, cursor, {
-            includeGas: wantGas,
-            sinceBlock: cursor ? null : since,
-          })
-          if (stopped) return
-          if (body.trades.length > 0) {
-            setTrades((current) => {
-              if (current.length >= MAX_TRADES) return current
-              const merged = mergeNewTrades(current, body.trades)
-              if (merged === current) return current
-              const room = merged.length > MAX_TRADES ? merged.slice(0, MAX_TRADES) : merged
-              added += room.length - current.length
-              const polished = polishTape(api.pool!, room)
-              tradesRef.current = polished
-              return polished
-            })
-          }
-          cursor = body.nextCursor
-          if (tradesRef.current.length >= MAX_TRADES) {
-            setCapped(true)
-            cursor = null
-          }
-        } while (cursor)
-        if (stopped) return
-        if (added > 0 && api.pool) {
-          const snapshot = tradesRef.current
-          const hadHolders = api.lookupHolders || snapshot.some((trade) => trade.holders != null)
-          if (hadHolders) void api.lookUpHolders(api.pool.chainId, api.pool, snapshot, run.current)
-          void persistCaughtUpTape(api.pool, snapshot, api).then(() => refreshSavedList().catch(() => undefined))
-        }
-        if (!stopped) setLiveMode("live")
-      } catch {
-        if (!stopped) setLiveMode("live")
-      }
-      if (!stopped) timer = window.setTimeout(() => void tick(), LIVE_POLL_MS)
+      if (stopped()) return
+      const ran = await catchUpLatest(false, stopped)
+      if (stopped()) return
+      timer = window.setTimeout(() => void tick(), ran ? LIVE_POLL_MS : 1_000)
     }
 
     void tick()
     return () => {
-      stopped = true
+      liveGeneration.current += 1
       window.clearTimeout(timer)
     }
-    // lookUpHolders is a stable function declaration; liveApi is read inside the tick.
+    // catchUpLatest reads the latest tape through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, pool, url])
+  }, [liveEnabled, phase, pool, url])
 
   function persistLookupFlag(key: string, next: boolean) {
     try {
@@ -515,6 +514,94 @@ export function Exporter() {
   function changeLookupHolders(next: boolean) {
     setLookupHolders(next)
     persistLookupFlag(LOOKUP_HOLDERS_KEY, next)
+  }
+
+  function changeLiveEnabled(next: boolean) {
+    setLiveEnabled(next)
+    liveEnabledRef.current = next
+    persistLookupFlag(LIVE_ENABLED_KEY, next)
+    if (!next && !catchUpLock.current) setLiveMode("off")
+  }
+
+  /**
+   * Append swaps newer than the open tape. Live polling and the Update button
+   * share this so a saved pair can catch up without a full Load swaps.
+   */
+  async function catchUpLatest(manual: boolean, isStopped: () => boolean = () => false): Promise<boolean> {
+    if (catchUpLock.current) {
+      if (manual) flashNotice("Already checking the chain for new swaps.", "info")
+      return false
+    }
+    const api = liveApi.current
+    const watchUrl = api.url.trim()
+    if (!api.pool || !watchUrl || tradesRef.current.length === 0) {
+      if (manual) flashNotice("Open a saved pair or load swaps before updating.", "info")
+      return false
+    }
+    const since = newestTradeBlock(tradesRef.current)
+    if (!since) {
+      if (manual) flashNotice("This tape has no block to continue from. Use Load swaps.", "info")
+      return false
+    }
+    catchUpLock.current = true
+    if (manual) setManualUpdating(true)
+    setLiveMode("updating")
+    let cursor: string | null = null
+    let added = 0
+    const wantGas = api.lookupGas || tradesRef.current.some((trade) => trade.gasPriceGwei)
+    try {
+      do {
+        if (isStopped()) return false
+        const body = await getSwapPage(watchUrl, cursor, {
+          includeGas: wantGas,
+          sinceBlock: cursor ? null : since,
+        })
+        if (isStopped()) return false
+        if (body.trades.length > 0 && api.pool) {
+          const current = tradesRef.current
+          if (current.length < MAX_TRADES) {
+            const merged = mergeNewTrades(current, body.trades)
+            if (merged !== current) {
+              const room = merged.length > MAX_TRADES ? merged.slice(0, MAX_TRADES) : merged
+              added += room.length - current.length
+              const polished = polishTape(api.pool, room)
+              tradesRef.current = polished
+              setTrades(polished)
+            }
+          }
+        }
+        cursor = body.nextCursor
+        if (tradesRef.current.length >= MAX_TRADES) {
+          setCapped(true)
+          cursor = null
+        }
+      } while (cursor)
+      if (isStopped()) return false
+      if (added > 0 && api.pool) {
+        const snapshot = tradesRef.current
+        const hadHolders = api.lookupHolders || snapshot.some((trade) => trade.holders != null)
+        if (hadHolders) void api.lookUpHolders(api.pool.chainId, api.pool, snapshot, run.current)
+        void persistCaughtUpTape(api.pool, snapshot, api).then(() => refreshSavedList().catch(() => undefined))
+      }
+      if (manual) {
+        const pair = `${api.pool.baseSymbol} / ${api.pool.quoteSymbol}`
+        flashNotice(
+          added > 0
+            ? `Updated ${pair} with ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}.`
+            : `${pair} is already up to date.`,
+          "ok",
+        )
+      }
+    } catch (error) {
+      if (manual && !isStopped()) {
+        flashNotice(error instanceof Error ? error.message : "Could not update this pair.", "error")
+      }
+    } finally {
+      catchUpLock.current = false
+      if (manual) setManualUpdating(false)
+      if (!isStopped() || !liveEnabledRef.current) setLiveMode(liveEnabledRef.current ? "live" : "off")
+    }
+    return !isStopped()
   }
 
   const tapeReady = phase === "done" && pool !== null && rawTrades.length > 0
@@ -1117,6 +1204,17 @@ export function Exporter() {
       volume: summary.volume > 0 ? formatUsd(summary.volume.toFixed(2)) : "—",
     }
   }, [trades])
+
+  const poolAnchor = useMemo(() => latestPoolMcapAnchor(rawTrades), [rawTrades])
+  const gasSpend = useMemo(
+    () => (pool ? totalGasSpend(rawTrades, pool.quoteSymbol, ethUsd) : null),
+    [pool, rawTrades, ethUsd],
+  )
+  const pooledShown = pooledEdited ? pooledInput : poolAnchor ? trimDecimal(poolAnchor.quoteReserve) : ""
+  const estimatedMcap =
+    poolAnchor && pooledShown
+      ? marketCapAtPooledQuote(poolAnchor.quoteReserve, poolAnchor.marketCapUsd, pooledEdited ? pooledShown : poolAnchor.quoteReserve)
+      : null
 
   const allVisibleSelected = pageRows.length > 0 && pageRows.every((trade) => activeSelected.has(trade.id))
   const someVisibleSelected = pageRows.some((trade) => activeSelected.has(trade.id))
@@ -1845,7 +1943,7 @@ export function Exporter() {
         <label htmlFor="pair-url" className="mb-2 block text-sm font-medium">
           DEXTools pair URL
         </label>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2">
           <Input
             id="pair-url"
             value={url}
@@ -1854,9 +1952,10 @@ export function Exporter() {
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            className="h-11 flex-1 font-mono text-sm"
+            className="h-11 w-full font-mono text-sm"
             aria-invalid={phase === "error"}
           />
+          <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="lg"
@@ -1879,10 +1978,45 @@ export function Exporter() {
               </span>
             ) : null}
           </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            className="h-11 px-4"
+            disabled={phase === "loading" || manualUpdating || liveMode === "updating" || !pool || rawTrades.length === 0}
+            title={pool && rawTrades.length > 0 ? "Append swaps newer than this tape" : "Open a saved pair or load swaps first"}
+            onClick={() => void catchUpLatest(true)}
+          >
+            {manualUpdating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            {manualUpdating ? "Updating…" : "Update"}
+          </Button>
           <Button type="submit" size="lg" className="h-11 px-4" disabled={phase === "loading" || url.trim() === ""}>
             {phase === "loading" ? <Loader2 className="animate-spin" /> : null}
             {phase === "loading" ? "Reading chain" : "Load swaps"}
           </Button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={liveEnabled}
+            aria-label="Real-time updates"
+            title={
+              liveEnabled
+                ? "Real-time updates on. New swaps are added about every 12 seconds."
+                : "Real-time updates off. Use Update to fetch the latest swaps."
+            }
+            onClick={() => changeLiveEnabled(!liveEnabled)}
+            className={`inline-flex h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium ring-1 ring-foreground/15 ${
+              liveEnabled ? "bg-emerald-500/15 text-emerald-300" : "bg-muted text-muted-foreground"
+            }`}
+          >
+            <span className={`relative h-5 w-9 shrink-0 rounded-full ${liveEnabled ? "bg-emerald-500" : "bg-foreground/20"}`}>
+              <span
+                className={`absolute top-0.5 size-4 rounded-full bg-white transition-transform ${liveEnabled ? "left-4" : "left-0.5"}`}
+              />
+            </span>
+            Live
+          </button>
+          </div>
         </div>
         <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
           <p className="text-xs">
@@ -2492,6 +2626,43 @@ export function Exporter() {
             <Stat label="Quote volume" value={stats.volume} />
           </div>
 
+          {pool && poolAnchor ? (
+            <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:flex-row sm:items-end sm:justify-between">
+              <label className="min-w-0 flex-1">
+                <span className="text-xs tracking-wide text-muted-foreground uppercase">
+                  Pooled {pool.quoteSymbol}
+                </span>
+                <Input
+                  value={pooledShown}
+                  onChange={(event) => {
+                    setPooledEdited(true)
+                    setPooledInput(event.target.value)
+                  }}
+                  inputMode="decimal"
+                  spellCheck={false}
+                  className="mt-1 h-11 max-w-xs font-mono"
+                  aria-label={`Pooled ${pool.quoteSymbol} for market cap`}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Market cap moves with the square of pooled {pool.quoteSymbol}. The current amount matches the latest row.
+                </p>
+              </label>
+              <div className="min-w-0 sm:text-right">
+                <p className="text-xs tracking-wide text-muted-foreground uppercase">Estimated M. Cap</p>
+                <p className={`mt-1 font-mono text-xl ${changeTone(poolAnchor.marketCapUsd, estimatedMcap)}`}>
+                  {estimatedMcap ? formatUsd(estimatedMcap) : "—"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Latest row {formatPoolSize(trimDecimal(poolAnchor.quoteReserve))} {pool.quoteSymbol} →{" "}
+                  {formatUsd(poolAnchor.marketCapUsd)}
+                  {estimatedMcap && normalizePooledQuote(pooledShown) !== ""
+                    ? ` · ${describeMcapMultiple(poolAnchor.marketCapUsd, estimatedMcap)}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {warning ? <p className="text-sm text-muted-foreground">{warning}</p> : null}
           {capped ? (
             <p className="text-sm text-muted-foreground">
@@ -2543,7 +2714,28 @@ export function Exporter() {
                 Empty blacklist
               </Button>
             </div>
-            {tableView === "minutes" ? (
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9"
+                disabled={!pool || rawTrades.length === 0}
+                aria-pressed={showTotalGas}
+                onClick={() => setShowTotalGas((open) => !open)}
+              >
+                Total Gas
+              </Button>
+              {showTotalGas && gasSpend ? (
+                <p className="font-mono text-sm text-foreground" role="status">
+                  {gasSpend.txCount === 0
+                    ? "No gas loaded yet. Turn on Gas and use Load."
+                    : `${formatGasUsd(gasSpend.usd)} · ${trimDecimal(ethFromWei(gasSpend.wei))} ETH · ${gasSpend.txCount.toLocaleString("en-US")} txs${
+                        gasSpend.missing > 0 ? ` · ${gasSpend.missing.toLocaleString("en-US")} still missing` : ""
+                      }`}
+                </p>
+              ) : null}
+              {tableView === "minutes" ? (
               <p className="text-sm text-muted-foreground">
                 Deep Analysis Â· buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
               </p>
@@ -2554,6 +2746,7 @@ export function Exporter() {
             ) : (
               <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, gas, and funders.</p>
             )}
+            </div>
           </div>
 
           {tableView === "minutes" ? (
@@ -3248,6 +3441,7 @@ export function Exporter() {
                     {showTx("quoteReserve") ? <SortHeader label={`Pool ${pool.quoteSymbol}`} column="quoteReserve" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
                     {showTx("holders") ? <SortHeader label="Holders" column="holders" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" /> : null}
                     {showTx("gasPriceGwei") ? <SortHeader label="Gas Price" column="gasPriceGwei" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" title="Effective gas price paid by this tx (gwei) = base fee + priority tip from the receipt. Bots often tip far above the Etherscan gas-tracker average." /> : null}
+                    {showTx("gasUsd") ? <SortHeader label="Gas" column="gasUsd" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" title="This transaction’s fee in USD: gas used × effective gas price, times the ETH price. Same figure GMGN shows in its Gas column." /> : null}
                     {showTx("gasFeeTotalEth") ? <SortHeader label="Gas Fee Total" column="gasFeeTotalEth" sortKey={sortKey} desc={sortDesc} onSort={toggleSort} align="right" title="Running sum of unique-tx gas costs (ETH) from the oldest loaded trade through this row" /> : null}
                     {showTx("maker") ? (
                       <th
@@ -3395,6 +3589,23 @@ export function Exporter() {
                             }
                           >
                             {displayGwei(trade.gasPriceGwei) ? `${displayGwei(trade.gasPriceGwei)} gwei` : "—"}
+                          </td>
+                        ) : null}
+                        {showTx("gasUsd") ? (
+                          <td
+                            className="px-3 py-2 text-right font-mono text-sm tabular-nums"
+                            title={
+                              trade.gasFeeWei && /^\d+$/.test(trade.gasFeeWei)
+                                ? `${ethFromWei(BigInt(trade.gasFeeWei))} ETH exact fee for this transaction (gas used × effective gas price).`
+                                : "Gas fee unavailable until receipts are loaded"
+                            }
+                          >
+                            {(() => {
+                              const usd = pool ? rowGasUsd(trade, pool.quoteSymbol, ethUsd) : null
+                              if (usd) return formatGasUsd(usd)
+                              if (trade.gasFeeWei && pool?.chainId === "ether" && ethUsd == null) return "…"
+                              return "—"
+                            })()}
                           </td>
                         ) : null}
                         {showTx("gasFeeTotalEth") ? (
@@ -3688,6 +3899,7 @@ function isMissing(trade: Trade, key: SortKey): boolean {
   if (key === "fundedBy") return !trade.fundedBy
   if (key === "holders") return trade.holders === null
   if (key === "gasPriceGwei") return trade.gasPriceGwei === null
+  if (key === "gasUsd") return !trade.gasFeeWei
   if (key === "gasFeeTotalEth") return trade.gasFeeTotalEth === null
   if (key === "maker") return !trade.maker
   if (key === "timestamp" || key === "type") return false
@@ -3702,6 +3914,7 @@ function compareTrades(a: Trade, b: Trade, key: SortKey): number {
   if (key === "makerTxCount") return a.makerTxCount - b.makerTxCount
   if (key === "txNo") return a.txNo - b.txNo
   if (key === "holders") return (a.holders ?? -1) - (b.holders ?? -1)
+  if (key === "gasUsd") return compareDecimal(a.gasFeeWei ?? "0", b.gasFeeWei ?? "0")
   return compareDecimal(a[key] ?? "0", b[key] ?? "0")
 }
 
