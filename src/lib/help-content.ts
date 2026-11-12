@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-09"
+export const HELP_UPDATED_AT = "2026-11-11"
 
 export type HelpExample = {
   title: string
@@ -159,6 +159,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     summary: "Focus the tape and shrink horizontal scroll.",
     bullets: [
       "Type chips (All / Buys / Sells / Adds / Removes / Init) and Funded by filter the view.",
+      "Team wallets stores named address lists on this browser. Save adds or replaces that label and keeps the others. Edit reloads the list. Delete removes it. Pick a label, then Only labeled shows trades from those wallets, and Without label shows every other trade. The line under the filters is the net quote: buys add, sells subtract.",
       "Search matches maker, funder, or tx hash.",
       "Columns opens a checklist for Transactions or Deep Analysis — hide unused fields to reduce sideways scrolling. Choices are remembered on this browser.",
       "The table scrolls inside its own frame, vertically and horizontally, the same way. Column headers stay pinned. Page controls stay under the frame.",
@@ -175,6 +176,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         title: "Review a few ticks",
         body: "Check several rows → Show selected → Calculate Income on just those. Clear selection when you are done.",
+      },
+      {
+        title: "Team label ETH",
+        body: "Team wallets → name ETH, paste the team addresses, Save. Choose ETH and Only labeled to see those makers. Without label shows everyone else. If those wallets bought 1.50 ETH and sold 0.25 ETH, the line reads net +1.2500 ETH. Buys add the quote amount and sells subtract it.",
       },
       {
         title: "First hours after launch",

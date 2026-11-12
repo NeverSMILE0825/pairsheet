@@ -6,6 +6,7 @@ import { MevBotIcon } from "@/components/mev-bot-icon"
 import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
+import { TeamLabelsDialog } from "@/components/team-labels-dialog"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
@@ -55,6 +56,7 @@ import {
   sumDecimals,
 } from "@/lib/format"
 import { describeMcapMultiple, latestPoolMcapAnchor, marketCapAtPooledQuote, normalizePooledQuote, trimDecimal } from "@/lib/mcap-pool"
+import { makerInLabel, netQuoteFlow, readTeamLabels, writeTeamLabels, type LabelMode, type TeamLabel } from "@/lib/team-labels"
 import { latestQuotePrice, summarizeMakers } from "@/lib/maker"
 import { summarizeTrades } from "@/lib/trade-stats"
 import { latestQuoteUsdPrice, quoteAbsDelta, quoteAmountToUsd } from "@/lib/trade-size"
@@ -357,6 +359,10 @@ export function Exporter() {
   const [pooledEdited, setPooledEdited] = useState(false)
   const [ethUsd, setEthUsd] = useState<number | null>(null)
   const [showTotalGas, setShowTotalGas] = useState(false)
+  const [teamLabels, setTeamLabels] = useState<TeamLabel[]>([])
+  const [teamLabelsOpen, setTeamLabelsOpen] = useState(false)
+  const [labelId, setLabelId] = useState("")
+  const [labelMode, setLabelMode] = useState<LabelMode>("only")
   const [fromNo, setFromNo] = useState("")
   const [toNo, setToNo] = useState("")
   const [noError, setNoError] = useState<string | null>(null)
@@ -386,6 +392,7 @@ export function Exporter() {
       setLookupGas(window.localStorage.getItem(LOOKUP_GAS_KEY) === "1")
       setLookupHolders(window.localStorage.getItem(LOOKUP_HOLDERS_KEY) === "1")
       if (window.localStorage.getItem(LIVE_ENABLED_KEY) === "0") setLiveEnabled(false)
+      setTeamLabels(readTeamLabels())
     } catch {
       setLookupFunders(false)
       setLookupGas(false)
@@ -1046,6 +1053,18 @@ export function Exporter() {
   const launchLabel =
     launchOrigin !== null && period ? describeLaunchWindow(launchOrigin, period.startMs, period.endMs) : null
 
+  const activeLabel = teamLabels.find((label) => label.id === labelId) ?? null
+  const activeLabelAddresses = useMemo(
+    () => (activeLabel ? new Set(activeLabel.addresses) : null),
+    [activeLabel],
+  )
+
+  function changeTeamLabels(next: TeamLabel[]) {
+    setTeamLabels(next)
+    writeTeamLabels(next)
+    if (labelId && !next.some((label) => label.id === labelId)) setLabelId("")
+  }
+
   const tapeQuery = useMemo(
     () => ({
       query,
@@ -1056,8 +1075,10 @@ export function Exporter() {
       showMevOnly,
       sortKey,
       sortDesc,
+      labelAddresses: activeLabelAddresses,
+      labelMode: activeLabel ? labelMode : null,
     }),
-    [query, filter, funder, period, showSelectedOnly, showMevOnly, sortKey, sortDesc],
+    [query, filter, funder, period, showSelectedOnly, showMevOnly, sortKey, sortDesc, activeLabelAddresses, activeLabel, labelMode],
   )
 
   const filtered = useMemo(
@@ -1084,6 +1105,18 @@ export function Exporter() {
   const viewingBlacklist = tableView === "blacklist"
   const activeTape = viewingBlacklist ? blacklistFiltered : filtered
   const activeSelected = viewingBlacklist ? blacklistSelected : selected
+  const labelNet = activeLabel ? netQuoteFlow(activeTape) : null
+  const labelsByMaker = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const label of teamLabels) {
+      for (const address of label.addresses) {
+        const names = map.get(address) ?? []
+        names.push(label.name)
+        map.set(address, names)
+      }
+    }
+    return map
+  }, [teamLabels])
 
   /** Minute tape ignores type filter so Buy/Sell columns both stay meaningful. */
   const minuteSource = useMemo(() => {
@@ -1091,6 +1124,7 @@ export function Exporter() {
     return trades.filter((trade) => {
       if (funder === "__none__" && trade.fundedByAddress) return false
       if (funder && funder !== "__none__" && trade.fundedByAddress !== funder) return false
+      if (activeLabelAddresses && !makerInLabel(trade.maker, activeLabelAddresses, labelMode)) return false
       if (period) {
         const time = Date.parse(trade.timestamp)
         if (!Number.isFinite(time) || time < period.startMs || time > period.endMs) return false
@@ -1103,7 +1137,7 @@ export function Exporter() {
         (trade.fundedByAddress ?? "").includes(needle)
       )
     })
-  }, [trades, funder, query, period])
+  }, [trades, funder, query, period, activeLabelAddresses, labelMode])
 
   const estimatedBuckets = useMemo(
     () => estimateBucketCount(minuteSource, intervalMs),
@@ -2859,6 +2893,62 @@ export function Exporter() {
             </label>
             {tableView !== "minutes" ? (
               <>
+                <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => setTeamLabelsOpen(true)}>
+                  Team wallets
+                  {teamLabels.length > 0 ? ` · ${teamLabels.length}` : ""}
+                </Button>
+                <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                  Label
+                  <select
+                    aria-label="Team wallet label"
+                    value={labelId}
+                    onChange={(event) => {
+                      setLabelId(event.target.value)
+                      selectionAnchor.current = null
+                      setPage(0)
+                    }}
+                    className="h-9 max-w-48 rounded-lg border border-input bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="">All wallets</option>
+                    {teamLabels.map((label) => (
+                      <option key={label.id} value={label.id}>
+                        {label.name} ({label.addresses.length.toLocaleString("en-US")})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex gap-1 rounded-lg bg-muted p-1" role="group" aria-label="Label transaction filter">
+                  <button
+                    type="button"
+                    aria-pressed={Boolean(activeLabel) && labelMode === "only"}
+                    disabled={!activeLabel}
+                    className={`rounded-md px-2.5 py-1 text-sm font-medium disabled:opacity-40 ${
+                      activeLabel && labelMode === "only" ? "bg-background text-foreground" : "text-muted-foreground"
+                    }`}
+                    onClick={() => {
+                      setLabelMode("only")
+                      selectionAnchor.current = null
+                      setPage(0)
+                    }}
+                  >
+                    Only labeled
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={Boolean(activeLabel) && labelMode === "without"}
+                    disabled={!activeLabel}
+                    className={`rounded-md px-2.5 py-1 text-sm font-medium disabled:opacity-40 ${
+                      activeLabel && labelMode === "without" ? "bg-background text-foreground" : "text-muted-foreground"
+                    }`}
+                    onClick={() => {
+                      setLabelMode("without")
+                      selectionAnchor.current = null
+                      setPage(0)
+                    }}
+                  >
+                    Without label
+                  </button>
+                </div>
                 <label className="flex items-center gap-2 text-sm text-muted-foreground">
                   Funded by
                   <select
@@ -2944,6 +3034,22 @@ export function Exporter() {
                 }}
               />
             )}
+            {activeLabel && labelNet !== null ? (
+              <p className="text-sm text-muted-foreground" aria-live="polite">
+                <span className="font-medium text-foreground">{activeLabel.name}</span>
+                {" · "}
+                {labelMode === "only" ? "only labeled" : "without this label"}
+                {" · "}
+                {activeLabel.addresses.length.toLocaleString("en-US")} wallets
+                {" · "}
+                {activeTape.length.toLocaleString("en-US")} txs
+                {" · net "}
+                <span className={labelNet.startsWith("-") ? "font-medium text-rose-400" : "font-medium text-emerald-400"}>
+                  {labelNet.startsWith("-") ? "" : "+"}
+                  {formatQuoteAmount(labelNet)} {pool?.quoteSymbol ?? ""}
+                </span>
+              </p>
+            ) : null}
           </div>
 
           {tableView !== "minutes" ? (
@@ -3632,6 +3738,14 @@ export function Exporter() {
                                 >
                                   {shortAddress(trade.maker)}
                                 </a>
+                                {(labelsByMaker.get(normalizeAddress(trade.maker)) ?? []).map((labelName) => (
+                                  <span
+                                    key={labelName}
+                                    className="ml-1.5 rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase"
+                                  >
+                                    {labelName}
+                                  </span>
+                                ))}
                                 <MakerCountButton
                                   maker={trade.maker}
                                   count={trade.makerTxCount}
@@ -3798,6 +3912,13 @@ export function Exporter() {
         </section>
       ) : null}
 
+      <TeamLabelsDialog
+        open={teamLabelsOpen}
+        labels={teamLabels}
+        onClose={() => setTeamLabelsOpen(false)}
+        onChange={changeTeamLabels}
+      />
+
       {pool ? (
         <IntervalChartDialog
           open={chartOpen}
@@ -3849,6 +3970,8 @@ function arrangeTape(
     showMevOnly: boolean
     sortKey: SortKey
     sortDesc: boolean
+    labelAddresses: Set<string> | null
+    labelMode: LabelMode | null
   },
 ): Trade[] {
   const needle = opts.query.trim().toLowerCase()
@@ -3858,6 +3981,7 @@ function arrangeTape(
     if (opts.filter !== "ALL" && trade.type !== opts.filter) return false
     if (opts.funder === "__none__" && trade.fundedByAddress) return false
     if (opts.funder && opts.funder !== "__none__" && trade.fundedByAddress !== opts.funder) return false
+    if (opts.labelAddresses && opts.labelMode && !makerInLabel(trade.maker, opts.labelAddresses, opts.labelMode)) return false
     if (opts.period) {
       const time = Date.parse(trade.timestamp)
       if (!Number.isFinite(time) || time < opts.period.startMs || time > opts.period.endMs) return false
