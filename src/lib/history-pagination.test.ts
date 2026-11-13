@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MAX_LOG_PAGE, ROUTESCAN_PAGE, continueAfterWindow, mergeNewTrades, newestTradeBlock, nextLogPage, positiveSinceBlock } from "./history"
+import { MAX_LOG_PAGE, ROUTESCAN_PAGE, continueAfterWindow, estimatedStartBlock, floorLooksClipped, mergeNewTrades, newestTradeBlock, nextLogPage, positiveSinceBlock } from "./history"
 import { signaturesUntilBlock } from "./solana"
 import type { Trade } from "./types"
 import type { RawLog } from "./types"
@@ -64,6 +64,18 @@ test("nextLogPage advances an existing window when the page reaches a newer bloc
     toBlock: null,
     blockscoutParams: null,
   })
+})
+
+test("a full chain read starts at the pool creation time and extends when logs touch that edge", () => {
+  const tip = 26_400_000
+  const now = Date.parse("2026-11-12T00:00:00Z")
+  const created = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString()
+  const floor = estimatedStartBlock(created, tip, now)
+  const threeDays = Math.ceil((3 * 24 * 60 * 60) / 12)
+  assert.equal(floor, tip - threeDays - 30_000)
+  assert.equal(estimatedStartBlock(null, tip, now), tip - 400_000)
+  assert.equal(floorLooksClipped(floor + 10, floor, tip), true)
+  assert.equal(floorLooksClipped(tip - 100, floor, tip), false)
 })
 
 test("live tail starts at the newest saved block and appends only new ids", () => {

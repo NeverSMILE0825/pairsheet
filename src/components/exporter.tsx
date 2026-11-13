@@ -553,59 +553,86 @@ export function Exporter() {
     catchUpLock.current = true
     if (manual) setManualUpdating(true)
     setLiveMode("updating")
-    let cursor: string | null = null
     let added = 0
-    const wantGas = api.lookupGas || tradesRef.current.some((trade) => trade.gasPriceGwei)
+    let failed = false
+    const beforeIds = new Set(tradesRef.current.map((trade) => trade.id))
     try {
-      do {
+      let failure = "Could not update this pair."
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1200 * attempt))
         if (isStopped()) return false
-        const body = await getSwapPage(watchUrl, cursor, {
-          includeGas: wantGas,
-          sinceBlock: cursor ? null : since,
-        })
-        if (isStopped()) return false
-        if (body.trades.length > 0 && api.pool) {
-          const current = tradesRef.current
-          if (current.length < MAX_TRADES) {
-            const merged = mergeNewTrades(current, body.trades)
-            if (merged !== current) {
-              const room = merged.length > MAX_TRADES ? merged.slice(0, MAX_TRADES) : merged
-              added += room.length - current.length
-              const polished = polishTape(api.pool, room)
-              tradesRef.current = polished
-              setTrades(polished)
+        try {
+          let cursor: string | null = null
+          do {
+            if (isStopped()) return false
+            const body = await getSwapPage(watchUrl, cursor, {
+              includeGas: false,
+              sinceBlock: cursor ? null : since,
+            })
+            if (isStopped()) return false
+            if (body.trades.length > 0 && api.pool) {
+              const current = tradesRef.current
+              if (current.length < MAX_TRADES) {
+                const merged = mergeNewTrades(current, body.trades)
+                if (merged !== current) {
+                  const room = merged.length > MAX_TRADES ? merged.slice(0, MAX_TRADES) : merged
+                  const polished = polishTape(api.pool, room)
+                  tradesRef.current = polished
+                  setTrades(polished)
+                }
+              }
             }
-          }
+            cursor = body.nextCursor
+            if (tradesRef.current.length >= MAX_TRADES) {
+              setCapped(true)
+              cursor = null
+            }
+          } while (cursor)
+          failure = ""
+          break
+        } catch (error) {
+          failure = error instanceof Error ? error.message : failure
+          if (error instanceof AppError && error.status < 500 && !/429|rate|upstream/i.test(failure)) break
         }
-        cursor = body.nextCursor
-        if (tradesRef.current.length >= MAX_TRADES) {
-          setCapped(true)
-          cursor = null
-        }
-      } while (cursor)
-      if (isStopped()) return false
-      if (added > 0 && api.pool) {
-        const snapshot = tradesRef.current
-        const hadHolders = api.lookupHolders || snapshot.some((trade) => trade.holders != null)
-        if (hadHolders) void api.lookUpHolders(api.pool.chainId, api.pool, snapshot, run.current)
-        void persistCaughtUpTape(api.pool, snapshot, api).then(() => refreshSavedList().catch(() => undefined))
       }
-      if (manual) {
+      if (isStopped()) return false
+      if (failure) {
+        failed = true
+        flashNotice(
+          /429|rate|upstream/i.test(failure)
+            ? "The chain is rate limiting log requests. Update will keep trying."
+            : failure,
+          "error",
+        )
+        return false
+      }
+      const snapshot = tradesRef.current
+      added = snapshot.filter((trade) => !beforeIds.has(trade.id)).length
+      let enriched = snapshot
+      if (added > 0 && api.pool) {
+        setProgress(`Updating gas, holders, and funded by for ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}…`)
+        enriched = await enrichNewTrades(api.pool.chainId, api.pool, snapshot, beforeIds)
+        if (isStopped()) return false
+        enriched = polishTape(api.pool, enriched)
+        tradesRef.current = enriched
+        setTrades(enriched)
+        setProgress("")
+        void persistCaughtUpTape(api.pool, enriched, api).then(() => refreshSavedList().catch(() => undefined))
+      }
+      setSaveNotice((current) => (current && /rate limiting|could not return logs/i.test(current) ? null : current))
+      if (manual && api.pool) {
         const pair = `${api.pool.baseSymbol} / ${api.pool.quoteSymbol}`
         flashNotice(
           added > 0
-            ? `Updated ${pair} with ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}.`
+            ? `Updated ${pair} with ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}, including gas, holders, and funded by.`
             : `${pair} is already up to date.`,
           "ok",
         )
       }
-    } catch (error) {
-      if (manual && !isStopped()) {
-        flashNotice(error instanceof Error ? error.message : "Could not update this pair.", "error")
-      }
     } finally {
       catchUpLock.current = false
       if (manual) setManualUpdating(false)
+      if (!failed) setProgress("")
       if (!isStopped() || !liveEnabledRef.current) setLiveMode(liveEnabledRef.current ? "live" : "off")
     }
     return !isStopped()
@@ -4181,6 +4208,67 @@ function Stat({
       ) : null}
     </div>
   )
+}
+
+/** Gas, holder counts, and funders for rows an update just appended. Existing values stay. */
+async function enrichNewTrades(
+  chainId: string,
+  pool: PoolView,
+  trades: Trade[],
+  beforeIds: Set<string>,
+): Promise<Trade[]> {
+  const chain = getChain(chainId)
+  if (!chain) return trades
+  let next = trades
+  const makerKey = (maker: string) => (chain.id === "solana" ? maker : maker.toLowerCase())
+  if (chain.id !== "solana" && chain.rpcs.length > 0) {
+    try {
+      const gas = await repairTradeGas(next, chain.rpcs)
+      if (gas.changed) next = gas.trades
+    } catch {
+      // Keep the new swaps even when receipt lookups are rate limited.
+    }
+  }
+  const known = new Map<string, { label: string; address: string | null }>()
+  for (const trade of next) {
+    if (!trade.maker || !trade.fundedBy) continue
+    known.set(makerKey(trade.maker), { label: trade.fundedBy, address: trade.fundedByAddress })
+  }
+  next = next.map((trade) => {
+    if (trade.fundedBy || !trade.maker) return trade
+    const hit = known.get(makerKey(trade.maker))
+    return hit ? { ...trade, fundedBy: hit.label, fundedByAddress: hit.address } : trade
+  })
+  const pending = [
+    ...new Set(
+      next
+        .filter((trade) => !beforeIds.has(trade.id) && trade.maker && !trade.fundedBy)
+        .map((trade) => makerKey(trade.maker)),
+    ),
+  ]
+  if (pending.length > 0) {
+    try {
+      const { found } = await resolveFunders(chain, pending, Date.now() + 45_000)
+      next = next.map((trade) => {
+        if (trade.fundedBy || !trade.maker) return trade
+        const match = found.get(makerKey(trade.maker))
+        return match ? { ...trade, fundedBy: match.label, fundedByAddress: match.address } : trade
+      })
+    } catch {
+      // The next update retries wallets the explorer did not answer.
+    }
+  }
+  try {
+    const { counts } = await resolveHolderCounts(chain, pool, next)
+    next = next.map((trade) => {
+      if (trade.holders !== null) return trade
+      const holders = counts.get(trade.id)
+      return holders === undefined ? trade : { ...trade, holders }
+    })
+  } catch {
+    // Holder totals stay blank when the transfer walk fails.
+  }
+  return next
 }
 
 /** Keep an existing local snapshot current after the live tail appends swaps. */

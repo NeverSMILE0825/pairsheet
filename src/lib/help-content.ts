@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-11"
+export const HELP_UPDATED_AT = "2026-11-12"
 
 export type HelpExample = {
   title: string
@@ -26,11 +26,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Supported: Ethereum and major EVM L2s, plus Solana pools that DEXTools indexes.",
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
       "Uniswap V4 is loaded from the pool id in the link. If a price index has not listed that pool yet, Pair Sheet reads the PoolManager Initialize event for the two tokens and still loads the tape. A regular pair whose index is missing falls back to the pool contract, then DexScreener.",
-      "Busy pools keep loading past the first pages. The explorer errors around 2,000 logs, and sometimes on a wide block range, so Pair Sheet continues from the newest block already read and retries a smaller range until the tape is complete (progress shows “Still reading the chain…”).",
+      "EVM swaps, including Uniswap V4 pool-id logs on the PoolManager, are read from the chain node. A 1,197-trade V4 pair loads every swap, not a single 1,000-log explorer page. If the node rejects the range, Pair Sheet falls back to the explorer and keeps going when that explorer returns 429.",
       "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
       "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
-      "Update, beside Load swaps, appends swaps newer than the open tape. Open a saved pair, then click Update to pull the latest rows without reading the whole history again.",
-      "Live, beside Load swaps, turns real-time updates on or off. On: Pair Sheet checks the chain about every 12 seconds and appends new swaps. Off: the tape stays still until you press Update. This browser remembers the choice. The Transactions card shows Live, or Updating… while a check is running. If this browser already saved the pair, the longer tape is written back locally.",
+      "Update, beside Load swaps, appends swaps newer than the open tape and fills Gas, Holders, and Funded by on those new rows (and on older rows that are still blank). Open a saved pair, then click Update to catch up without reading history you already have.",
+      "Live, beside Load swaps, turns real-time updates on or off. On: Pair Sheet checks the chain about every 12 seconds, appends new swaps, and fills gas, holders, and funded by for them. Off: the tape stays still until you press Update. This browser remembers the choice. The Transactions card shows Live, or Updating… while a check is running. If this browser already saved the pair, the longer tape is written back locally. A rate-limit message clears on the next successful check.",
     ],
     examples: [
       {
@@ -43,7 +43,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         title: "Saved tape on an active pair",
-        body: "GTA6 saved at 14,045 txs while DEXTools now shows 16.31K. Open the snapshot and click Update, or leave Live on so the count climbs on its own. The local save is updated. Load swaps is only needed for a first-time read or a full reload.",
+        body: "GTA / ETH is at 1,050 while DEXTools shows 1,197 trades. Click Update (or leave Live on). Pair Sheet reads the PoolManager swaps from the chain and appends the missing trades, then fills gas, holders, and who funded the new wallets. A “429” from the explorer no longer stops that catch-up.",
       },
       {
         title: "Pools with 10k+ trades",

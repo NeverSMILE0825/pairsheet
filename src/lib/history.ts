@@ -18,7 +18,7 @@ import {
   totalUsd,
 } from "./format"
 import { applyGasFees, fetchEthReceipts, parseReceiptGas, type ReceiptGas } from "./gas-fees"
-import { AppError, fetchJson, mapPool, rpcBatch, rpcCall } from "./http"
+import { AppError, fetchJson, mapPool, rpcBatch, rpcCall, sleep } from "./http"
 import { parseDextoolsUrl } from "./parse-url"
 import { resolvePool } from "./pool"
 import { quotePricesAt } from "./prices"
@@ -227,6 +227,16 @@ async function readPage(
   const source = cursor?.source ?? (chain.routescan ? "routescan" : "blockscout")
   const fromBlock = positiveSinceBlock(cursor?.fromBlock) ?? sinceBlock
   const toBlock = cursor?.toBlock ?? null
+  // Chain nodes return the whole range in one eth_getLogs. Routescan pages of
+  // 1,000 (and HTTP 429) were stopping V4 tapes short of the DEXTools count.
+  if (chain.rpcs.length > 0 && !cursor?.blockscoutParams) {
+    try {
+      const logs = await readRpcLogs(chain, pool.logAddress, topic, pool.topic1, fromBlock, toBlock, pool.createdAt)
+      return { logs, next: null }
+    } catch {
+      // Fall through to the explorer when every node rejects the range.
+    }
+  }
   if (source === "routescan") {
     return readRoutescan(chain, pool, topic, cursor?.page ?? 1, fromBlock, toBlock)
   }
@@ -245,6 +255,224 @@ async function readPage(
     )
   }
   return readBlockscout(chain.blockscout, pool.logAddress, topic, cursor?.blockscoutParams ?? null)
+}
+
+/** Exact page sizes nodes use when they silently truncate eth_getLogs. */
+const RPC_LOG_CAPS = new Set([1000, 2000, 5000, 10000])
+
+function looksCapped(count: number): boolean {
+  return RPC_LOG_CAPS.has(count)
+}
+
+/** Blocks of padding before a pool's indexed creation time (~12s blocks). */
+const CREATION_PAD_BLOCKS = 30_000
+
+/**
+ * Block to start a full read when the caller has no fromBlock.
+ * Uses the pool's creation time so we do not scan back to genesis.
+ * Unknown age starts about 55 days back; the caller extends if logs touch that edge.
+ */
+export function estimatedStartBlock(createdAt: string | null, tip: number, now = Date.now()): number {
+  if (tip <= 0) return 0
+  const fallback = Math.max(0, tip - 400_000)
+  if (!createdAt) return fallback
+  const createdMs = Date.parse(createdAt)
+  if (!Number.isFinite(createdMs)) return fallback
+  const seconds = Math.max(0, Math.floor((now - createdMs) / 1000))
+  return Math.max(0, tip - Math.ceil(seconds / 12) - CREATION_PAD_BLOCKS)
+}
+
+/** True when the oldest log sits on the start of the window, so older history may exist. */
+export function floorLooksClipped(minBlock: number, floor: number, tip: number): boolean {
+  if (floor <= 0 || minBlock <= 0 || minBlock > tip) return false
+  const span = Math.max(1, tip - floor)
+  return minBlock <= floor + Math.max(64, Math.floor(span * 0.02))
+}
+
+export async function readRpcLogs(
+  chain: ChainConfig,
+  address: string,
+  topic0: string,
+  topic1: string | null,
+  fromBlock: number | null,
+  toBlock: number | null,
+  createdAt: string | null = null,
+): Promise<RawLog[]> {
+  if (chain.rpcs.length === 0) throw new AppError("No chain RPC is configured.", 422)
+  const tip = toBlock && toBlock > 0 ? toBlock : await tipBlock(chain)
+  if (tip <= 0) throw new AppError("The chain did not report a block height.", 502)
+  let floor = fromBlock && fromBlock > 0 ? fromBlock : estimatedStartBlock(createdAt, tip)
+  if (floor > tip) floor = tip
+  const lockedFloor = fromBlock != null && fromBlock > 0
+  const preferred = { rpc: null as string | null }
+
+  let logs = await logsInRange(chain, address, topic0, topic1, floor, tip, 0, preferred)
+  if (!lockedFloor) {
+    for (let extend = 0; extend < 8 && floor > 0; extend += 1) {
+      const minBlock = logs.reduce((min, log) => (log.blockNumber > 0 && log.blockNumber < min ? log.blockNumber : min), Number.POSITIVE_INFINITY)
+      if (!floorLooksClipped(minBlock, floor, tip)) break
+      const span = Math.max(CREATION_PAD_BLOCKS, tip - floor)
+      const nextFloor = Math.max(0, floor - span)
+      if (nextFloor >= floor) break
+      const older = await logsInRange(chain, address, topic0, topic1, nextFloor, floor - 1, 0, preferred)
+      logs = dedupeLogs([...older, ...logs])
+      floor = nextFloor
+    }
+  }
+  // An empty full-history read is not proof the pair has no swaps (the start
+  // block can sit after the pool). Let the explorer walk from block 0.
+  if (!lockedFloor && logs.length === 0) {
+    throw new AppError("Chain node returned no logs for this range.", 502)
+  }
+  return fillTimestamps(chain, logs)
+}
+
+async function logsInRange(
+  chain: ChainConfig,
+  address: string,
+  topic0: string,
+  topic1: string | null,
+  fromBlock: number,
+  toBlock: number,
+  depth: number,
+  preferred: { rpc: string | null },
+): Promise<RawLog[]> {
+  if (fromBlock > toBlock) return []
+  try {
+    const batch = await ethGetLogs(chain, address, topic0, topic1, fromBlock, toBlock, preferred)
+    if (looksCapped(batch.length) && toBlock > fromBlock && depth < 24) {
+      const mid = fromBlock + Math.floor((toBlock - fromBlock) / 2)
+      try {
+        const left = await logsInRange(chain, address, topic0, topic1, fromBlock, mid, depth + 1, preferred)
+        const right = await logsInRange(chain, address, topic0, topic1, mid + 1, toBlock, depth + 1, preferred)
+        return dedupeLogs([...left, ...right])
+      } catch (error) {
+        // A page larger than the known caps is already complete. An exact cap is not.
+        if (batch.length > 1000) return batch
+        throw error
+      }
+    }
+    return batch
+  } catch (error) {
+    if (toBlock > fromBlock && depth < 24 && isSplitError(error)) {
+      const mid = fromBlock + Math.floor((toBlock - fromBlock) / 2)
+      const left = await logsInRange(chain, address, topic0, topic1, fromBlock, mid, depth + 1, preferred)
+      const right = await logsInRange(chain, address, topic0, topic1, mid + 1, toBlock, depth + 1, preferred)
+      return dedupeLogs([...left, ...right])
+    }
+    throw error
+  }
+}
+
+/** Range is too wide or too old for this node. Rate limits are retried, not split. */
+function isSplitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/429|rate limit|too many requests|timeout|timed out|502|503|504|upstream responded/i.test(message)) return false
+  return /range|too many|more than|exceed|query returned|block range|response size|archive/i.test(message)
+}
+
+async function ethGetLogs(
+  chain: ChainConfig,
+  address: string,
+  topic0: string,
+  topic1: string | null,
+  fromBlock: number,
+  toBlock: number,
+  preferred: { rpc: string | null },
+): Promise<RawLog[]> {
+  const filter = {
+    address,
+    topics: topic1 ? [topic0, topic1] : [topic0],
+    fromBlock: `0x${fromBlock.toString(16)}`,
+    toBlock: `0x${toBlock.toString(16)}`,
+  }
+  let last: Error | null = null
+  const rpcs = preferred.rpc
+    ? [preferred.rpc, ...chain.rpcs.filter((rpc) => rpc !== preferred.rpc)]
+    : chain.rpcs
+  for (let round = 0; round < 3; round += 1) {
+    let split: Error | null = null
+    let retry = false
+    for (const rpc of rpcs) {
+      try {
+        const response = await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getLogs", params: [filter] }),
+          signal: AbortSignal.timeout(30000),
+          cache: "no-store",
+        })
+        if (response.status === 429 || response.status >= 500) {
+          last = new Error(`Upstream responded ${response.status}`)
+          retry = true
+          continue
+        }
+        const body = (await response.json()) as { result?: unknown; error?: { message?: string } }
+        if (body.error) {
+          const reason = new Error(body.error.message || "eth_getLogs failed")
+          if (isSplitError(reason)) split = reason
+          else {
+            last = reason
+            retry = true
+          }
+          continue
+        }
+        if (!Array.isArray(body.result)) throw new Error("eth_getLogs returned no logs")
+        preferred.rpc = rpc
+        return body.result.map(routescanLog).filter((log): log is RawLog => log !== null)
+      } catch (error) {
+        last = error instanceof Error ? error : new Error("eth_getLogs failed")
+        if (isSplitError(last)) split = last
+        else retry = true
+      }
+    }
+    // Every node rejected the range itself. Splitting can help; retrying will not.
+    if (split && !retry) throw split
+    last = last ?? split
+    await sleep(800 * (round + 1))
+  }
+  throw new AppError(last?.message || "The chain node could not return logs.", 502)
+}
+
+function dedupeLogs(logs: RawLog[]): RawLog[] {
+  const seen = new Set<string>()
+  const out: RawLog[] = []
+  for (const log of logs) {
+    const id = `${log.txHash}-${log.logIndex}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(log)
+  }
+  return out
+}
+
+async function fillTimestamps(chain: ChainConfig, logs: RawLog[]): Promise<RawLog[]> {
+  const missing = [...new Set(logs.filter((log) => !log.timestamp && log.blockNumber > 0).map((log) => log.blockNumber))]
+  if (missing.length === 0 || chain.rpcs.length === 0) return logs
+  const stamps = new Map<number, number>()
+  for (let index = 0; index < missing.length; index += 20) {
+    const batch = missing.slice(index, index + 20)
+    for (const rpc of chain.rpcs) {
+      try {
+        const results = await rpcBatch(
+          rpc,
+          batch.map((block) => ({ method: "eth_getBlockByNumber", params: [`0x${block.toString(16)}`, false] })),
+        )
+        results.forEach((result, id) => {
+          const stamp = (result as { timestamp?: string } | null)?.timestamp
+          const block = batch[id]
+          if (typeof stamp !== "string" || block == null) return
+          const seconds = Number.parseInt(stamp, 16)
+          if (seconds > 0) stamps.set(block, seconds)
+        })
+        if (batch.every((block) => stamps.has(block))) break
+      } catch {
+        continue
+      }
+    }
+  }
+  if (stamps.size === 0) return logs
+  return logs.map((log) => (log.timestamp ? log : { ...log, timestamp: stamps.get(log.blockNumber) ?? 0 }))
 }
 
 async function tipBlock(chain: ChainConfig): Promise<number> {

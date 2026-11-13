@@ -1,5 +1,6 @@
 import type { ChainConfig } from "./chains"
 import { sameAddress } from "./decode"
+import { readRpcLogs } from "./history"
 import { fetchJson, mapPool } from "./http"
 import type { PoolView, Trade } from "./types"
 
@@ -168,6 +169,29 @@ async function loadEvmTransfers(
   token: string,
   toBlock: number | null,
 ): Promise<{ events: TransferEvent[]; truncated: boolean }> {
+  if (chain.rpcs.length > 0) {
+    try {
+      const logs = await readRpcLogs(chain, token, TRANSFER_TOPIC, null, null, toBlock, null)
+      const events = logs.flatMap((log) => {
+        const parsed = parseTransferLog({
+          topics: log.topics,
+          data: log.data,
+          blockNumber: log.blockNumber,
+          logIndex: log.logIndex,
+        })
+        return parsed ? [parsed] : []
+      })
+      if (events.length > 0) {
+        events.sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
+        return {
+          events: events.slice(0, MAX_TRANSFER_LOGS),
+          truncated: events.length > MAX_TRANSFER_LOGS,
+        }
+      }
+    } catch {
+      // Explorer pagination below still covers nodes that reject eth_getLogs.
+    }
+  }
   const events: TransferEvent[] = []
   const seen = new Set<string>()
   // Routescan/Etherscan getLogs are oldest-first and cap at 10k rows per from/to window.

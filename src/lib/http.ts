@@ -12,7 +12,7 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export async function fetchJson(url: string, init?: RequestInit, timeout = 25000, attempts = 2): Promise<unknown> {
+export async function fetchJson(url: string, init?: RequestInit, timeout = 25000, attempts = 4): Promise<unknown> {
   let last: Error | null = null
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -28,7 +28,7 @@ export async function fetchJson(url: string, init?: RequestInit, timeout = 25000
       })
       if (response.status === 429 || response.status >= 500) {
         last = new Error(`Upstream responded ${response.status}`)
-        await sleep(350 * (attempt + 1))
+        await sleep((response.status === 429 ? 1500 : 400) * (attempt + 1))
         continue
       }
       if (!response.ok) {
