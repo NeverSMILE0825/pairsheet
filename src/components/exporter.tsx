@@ -7,6 +7,7 @@ import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
 import { TeamLabelsDialog } from "@/components/team-labels-dialog"
+import { EtherscanKeysDialog } from "@/components/etherscan-keys-dialog"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
@@ -31,7 +32,8 @@ import {
   type DaColumnId,
   type TxColumnId,
 } from "@/lib/table-columns"
-import { FUNDER_REVISION, applyFunderResults, makerFunderKey, makersToRefresh, resolveFunders, type Funder } from "@/lib/funded"
+import { FUNDER_REVISION, applyFunderResults, clampFunderDepth, makerFunderKey, makersToRefresh, resolveFunders, type Funder, type FunderLookup } from "@/lib/funded"
+import { readEtherscanKeys, writeEtherscanKeys, type EtherscanKey } from "@/lib/etherscan-keys"
 import { resolveHolderCounts } from "@/lib/holders"
 import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
 import { getSwapPage, mergeNewTrades, newestTradeBlock } from "@/lib/history"
@@ -145,6 +147,7 @@ type PeriodFilter = { startMs: number; endMs: number }
 const MAX_TRADES = 50000
 const ZONE_KEY = "pairsheet.timezone"
 const LOOKUP_FUNDERS_KEY = "pairsheet.lookupFunders"
+const FUNDER_DEPTH_KEY = "pairsheet.funderDepth"
 const LOOKUP_GAS_KEY = "pairsheet.lookupGas"
 const LOOKUP_HOLDERS_KEY = "pairsheet.lookupHolders"
 const LIVE_ENABLED_KEY = "pairsheet.liveUpdates"
@@ -173,7 +176,7 @@ const EXTRA_LOOKUP_COPY: Record<
   },
   funders: {
     title: "Load Funded by?",
-    body: "Look up which address first funded each maker wallet. This is often the slowest optional step.",
+    body: "Look up who funded each maker at the depth next to Funded by. Depth 2 is the funder of that funder. Saved Etherscan keys are used in parallel. A hop that fails is left blank and retried — it is not shown as a shorter result.",
     confirm: "Load Funded by",
   },
 }
@@ -300,6 +303,12 @@ export function Exporter() {
     }
   })
   const [lookupFunders, setLookupFunders] = useState(false)
+  const [funderDepth, setFunderDepth] = useState(1)
+  const funderDepthRef = useRef(1)
+  const resolvedFunderDepth = useRef<number | undefined>(undefined)
+  const [shownFunderDepth, setShownFunderDepth] = useState<number | null>(null)
+  const [etherscanKeys, setEtherscanKeys] = useState<EtherscanKey[]>([])
+  const [etherscanKeysOpen, setEtherscanKeysOpen] = useState(false)
   const [lookupGas, setLookupGas] = useState(false)
   const [lookupHolders, setLookupHolders] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -329,6 +338,7 @@ export function Exporter() {
     funderTargets: string[]
     funderRevision: number | undefined
     funderChecked: string[] | undefined
+    funderDepth: number
     repairGas: boolean
   } | null>(null)
   const liveApi = useRef({
@@ -389,6 +399,10 @@ export function Exporter() {
   useEffect(() => {
     try {
       setLookupFunders(window.localStorage.getItem(LOOKUP_FUNDERS_KEY) === "1")
+      const storedDepth = clampFunderDepth(Number(window.localStorage.getItem(FUNDER_DEPTH_KEY) || "1"))
+      funderDepthRef.current = storedDepth
+      setFunderDepth(storedDepth)
+      setEtherscanKeys(readEtherscanKeys())
       setLookupGas(window.localStorage.getItem(LOOKUP_GAS_KEY) === "1")
       setLookupHolders(window.localStorage.getItem(LOOKUP_HOLDERS_KEY) === "1")
       if (window.localStorage.getItem(LIVE_ENABLED_KEY) === "0") setLiveEnabled(false)
@@ -611,7 +625,7 @@ export function Exporter() {
       let enriched = snapshot
       if (added > 0 && api.pool) {
         setProgress(`Updating gas, holders, and funded by for ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}…`)
-        enriched = await enrichNewTrades(api.pool.chainId, api.pool, snapshot, beforeIds)
+        enriched = await enrichNewTrades(api.pool.chainId, api.pool, snapshot, beforeIds, currentFunderLookup())
         if (isStopped()) return false
         enriched = polishTape(api.pool, enriched)
         tradesRef.current = enriched
@@ -788,6 +802,29 @@ export function Exporter() {
     setPage(0)
   }
 
+  function currentFunderLookup(): FunderLookup {
+    return {
+      depth: funderDepthRef.current,
+      apiKeys: readEtherscanKeys().map((row) => row.key),
+    }
+  }
+
+  function changeFunderDepth(value: string) {
+    const next = clampFunderDepth(Number(value))
+    funderDepthRef.current = next
+    setFunderDepth(next)
+    try {
+      window.localStorage.setItem(FUNDER_DEPTH_KEY, String(next))
+    } catch {
+      // The control still applies to the next lookup.
+    }
+  }
+
+  function changeEtherscanKeys(next: EtherscanKey[]) {
+    writeEtherscanKeys(next)
+    setEtherscanKeys(next)
+  }
+
   async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []) {
     const chain = getChain(chainId)
     if (!chain) return
@@ -812,6 +849,7 @@ export function Exporter() {
     const total = pending.length
     let done = 0
     if (total === 0) return
+    const lookup = currentFunderLookup()
     setFunding({ done, total })
 
     for (let pass = 0; pass < FUNDER_PASSES && pending.length > 0 && run.current === token; pass += 1) {
@@ -829,6 +867,7 @@ export function Exporter() {
               batch,
               Date.now() + 45000,
               solana ? earliestTradeSec : undefined,
+              lookup,
             )
             const missed = new Set(failed)
             if (run.current !== token) return
@@ -854,7 +893,14 @@ export function Exporter() {
       await Promise.all(Array.from({ length: FUNDER_PARALLEL }, worker))
       pending = retry
     }
-    if (run.current === token) setFunding(null)
+    if (run.current === token) {
+      setFunding(null)
+      if (pending.length === 0) {
+        const depth = clampFunderDepth(lookup.depth ?? 1)
+        resolvedFunderDepth.current = depth
+        setShownFunderDepth(depth)
+      }
+    }
   }
 
   async function lookUpHolders(chainId: string, view: PoolView, loaded: Trade[], token: number) {
@@ -892,6 +938,8 @@ export function Exporter() {
     setCapped(false)
     setPool(null)
     setTrades([])
+    resolvedFunderDepth.current = undefined
+    setShownFunderDepth(null)
     setFacts(EMPTY_FACTS)
     setFunder("")
     setSelected(new Set())
@@ -1544,6 +1592,7 @@ export function Exporter() {
         facts,
         warning,
         capped,
+        ...(resolvedFunderDepth.current !== undefined ? { funderDepth: resolvedFunderDepth.current } : {}),
       })
       restoreBookmark(meta.id)
       cacheBookmarkMetas([meta])
@@ -1592,7 +1641,7 @@ export function Exporter() {
     const pairLabel = `${job.pool.baseSymbol} / ${job.pool.quoteSymbol}`
     let latest = tradesRef.current
     let poolView = job.pool
-    const persist = async (funderRevision?: number, funderChecked?: string[]) => {
+    const persist = async (funderRevision?: number, funderChecked?: string[], funderDepth?: number) => {
       await saveAnalysis({
         url: job.url,
         pool: poolView,
@@ -1604,6 +1653,7 @@ export function Exporter() {
         starred: job.starred,
         funderRevision,
         funderChecked,
+        funderDepth,
       }).catch(() => null)
     }
     const publish = (next: Trade[]) => {
@@ -1687,7 +1737,10 @@ export function Exporter() {
       const batch = job.funderTargets.slice(index, index + batchSize)
       let batchFound = new Map<string, Funder>()
       try {
-        const result = await resolveFunders(chain, batch, Date.now() + 60_000, solana ? earliestTradeSec : undefined)
+        const result = await resolveFunders(chain, batch, Date.now() + 60_000, solana ? earliestTradeSec : undefined, {
+          depth: job.funderDepth,
+          apiKeys: readEtherscanKeys().map((row) => row.key),
+        })
         batchFound = result.found
         for (const [key, value] of result.found) found.set(key, value)
         for (const maker of result.failed) failed.add(maker)
@@ -1703,8 +1756,13 @@ export function Exporter() {
       }
       const applied = applyFunderResults(chain.id, latest, batchFound)
       if (applied.changed) publish(applied.trades)
-      const revision = failed.size === 0 && index + batch.length >= total ? FUNDER_REVISION : job.funderRevision
-      await persist(revision, [...checked])
+      const finished = failed.size === 0 && index + batch.length >= total
+      const revision = finished ? FUNDER_REVISION : job.funderRevision
+      await persist(revision, [...checked], finished ? job.funderDepth : undefined)
+      if (finished) {
+        resolvedFunderDepth.current = job.funderDepth
+        setShownFunderDepth(job.funderDepth)
+      }
       done = Math.min(index + batch.length, total) - failed.size
       setFunding({ done: Math.max(done, updated + unknown), total })
     }
@@ -1743,8 +1801,20 @@ export function Exporter() {
         setProgress("")
         const pairLabel = `${saved.pool.baseSymbol} / ${saved.pool.quoteSymbol}`
         const chain = getChain(saved.pool.chainId)
+        const anyFunder = saved.trades.some((trade) => trade.fundedByAddress)
+        const storedDepth = saved.funderDepth ?? (anyFunder ? 1 : undefined)
+        resolvedFunderDepth.current = storedDepth
+        setShownFunderDepth(storedDepth ?? null)
         const funderTargets = chain
-          ? makersToRefresh(chain.id, saved.trades, saved.funderRevision, saved.funderChecked, lookupFunders)
+          ? makersToRefresh(
+              chain.id,
+              saved.trades,
+              saved.funderRevision,
+              saved.funderChecked,
+              lookupFunders,
+              saved.funderDepth,
+              funderDepthRef.current,
+            )
           : []
         const repairGas = lookupGas && tradesNeedGasRepair(saved.trades)
         const gasCount = repairGas ? countMissingGas(saved.trades) : 0
@@ -1762,6 +1832,7 @@ export function Exporter() {
             funderTargets,
             funderRevision: saved.funderRevision,
             funderChecked: saved.funderChecked,
+            funderDepth: funderDepthRef.current,
             repairGas,
           }
           setSavedUpdateAsk({ pairLabel, funderCount: funderTargets.length, gasCount })
@@ -2133,6 +2204,26 @@ export function Exporter() {
                 />
                 <span className="min-w-0">Include on Load swaps Â· {row.label}</span>
               </label>
+              {row.kind === "funders" ? (
+                <>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground" htmlFor="funder-depth">
+                    Depth
+                    <Input
+                      id="funder-depth"
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={funderDepth}
+                      disabled={phase === "loading" || funding !== null}
+                      className="h-8 w-16"
+                      onChange={(event) => changeFunderDepth(event.target.value)}
+                    />
+                  </label>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => setEtherscanKeysOpen(true)}>
+                    Etherscan keys{etherscanKeys.length > 0 ? ` (${etherscanKeys.length})` : ""}
+                  </Button>
+                </>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
@@ -2146,6 +2237,11 @@ export function Exporter() {
               </Button>
             </div>
           ))}
+          {shownFunderDepth !== null && shownFunderDepth !== funderDepth ? (
+            <p className="text-xs text-amber-500">
+              This tape’s Funded by column is depth {shownFunderDepth}. Load Funded by to replace it with depth {funderDepth}.
+            </p>
+          ) : null}
         </div>
       </form>
 
@@ -3945,6 +4041,12 @@ export function Exporter() {
         onClose={() => setTeamLabelsOpen(false)}
         onChange={changeTeamLabels}
       />
+      <EtherscanKeysDialog
+        open={etherscanKeysOpen}
+        keys={etherscanKeys}
+        onClose={() => setEtherscanKeysOpen(false)}
+        onChange={changeEtherscanKeys}
+      />
 
       {pool ? (
         <IntervalChartDialog
@@ -4216,6 +4318,7 @@ async function enrichNewTrades(
   pool: PoolView,
   trades: Trade[],
   beforeIds: Set<string>,
+  lookup: FunderLookup = {},
 ): Promise<Trade[]> {
   const chain = getChain(chainId)
   if (!chain) return trades
@@ -4248,7 +4351,7 @@ async function enrichNewTrades(
   ]
   if (pending.length > 0) {
     try {
-      const { found } = await resolveFunders(chain, pending, Date.now() + 45_000)
+      const { found } = await resolveFunders(chain, pending, Date.now() + 45_000, undefined, lookup)
       next = next.map((trade) => {
         if (trade.fundedBy || !trade.maker) return trade
         const match = found.get(makerKey(trade.maker))

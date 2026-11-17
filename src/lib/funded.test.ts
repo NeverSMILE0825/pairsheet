@@ -3,9 +3,11 @@ import test from "node:test"
 import {
   FUNDER_REVISION,
   applyFunderResults,
+  describeFunderPath,
   earliestIncoming,
   fundingRowFromExplorer,
   makersToRefresh,
+  walkFunderDepth,
   type FundingRow,
 } from "./funded"
 
@@ -99,4 +101,47 @@ test("funded by ignores failed traces, self transfers, delegatecalls, and zero-v
     row({ from: "0x0000000000000000000000000000000000000055", blockNumber: 5, txIndex: 2 }),
   ])
   assert.equal(first?.from, "0x0000000000000000000000000000000000000055")
+})
+
+test("depth 2 is the funder of the funder, and a failed hop is not a shorter result", async () => {
+  const maker = "0x1230000000000000000000000000000000000001"
+  const hop1 = "0x4560000000000000000000000000000000000002"
+  const hop2 = "0x7890000000000000000000000000000000000003"
+  const graph = new Map([
+    [maker, hop1],
+    [hop1, hop2],
+  ])
+  const path = await walkFunderDepth(maker, 2, async (address) => graph.get(address) ?? null)
+  assert.deepEqual(path, [hop1, hop2])
+  assert.match(describeFunderPath(path ?? [], "Binance"), /via/)
+
+  await assert.rejects(
+    walkFunderDepth(maker, 2, async (address) => {
+      if (address === hop1) throw new Error("Etherscan rate limit")
+      return hop1
+    }),
+  )
+  assert.equal(
+    await walkFunderDepth(maker, 2, async (address) => (address === maker ? hop1 : null)),
+    null,
+  )
+})
+
+test("a saved tape is stale when the funded-by depth changed", () => {
+  const trades = [{ maker: "0xAAAA", fundedByAddress: "0x1111" }]
+  assert.deepEqual(makersToRefresh("ether", trades, FUNDER_REVISION, ["0xaaaa"], false, 1, 1), [])
+  assert.deepEqual(makersToRefresh("ether", trades, FUNDER_REVISION, ["0xaaaa"], false, 1, 2), ["0xaaaa"])
+  assert.deepEqual(
+    makersToRefresh("ether", [{ maker: "0xAAAA", fundedByAddress: null }], FUNDER_REVISION, ["0xaaaa"], false, 1, 2),
+    [],
+  )
+})
+
+test("the earlier credit wins when two lists disagree", () => {
+  const first = earliestIncoming(maker, [
+    row({ from: "0x00000000000000000000000000000000000000aa", blockNumber: 40 }),
+    row({ from: "0x00000000000000000000000000000000000000bb", blockNumber: 12, traceType: "call" }),
+  ])
+  assert.equal(first?.from, "0x00000000000000000000000000000000000000bb")
+  assert.equal(first?.blockNumber, 12)
 })

@@ -45,6 +45,8 @@ export type SavedAnalysisPayload = {
   funderRevision?: number
   /** Makers already checked. Blank funders in this list have no ETH credit. */
   funderChecked?: string[]
+  /** Depth those funders were resolved at. Missing means depth 1. */
+  funderDepth?: number
 }
 
 export function analysisId(pool: Pick<PoolView, "chainId" | "address">): string {
@@ -201,6 +203,7 @@ export async function saveAnalysis(input: {
   starred?: boolean
   funderRevision?: number
   funderChecked?: string[]
+  funderDepth?: number
 }): Promise<SaveAnalysisResult> {
   if (typeof indexedDB === "undefined") {
     throw new Error("Saved analyses need a browser with IndexedDB.")
@@ -246,6 +249,7 @@ export async function saveAnalysis(input: {
     capped: input.capped,
     funderRevision: input.funderRevision !== undefined ? input.funderRevision : existingPayload?.funderRevision,
     funderChecked: input.funderChecked !== undefined ? input.funderChecked : existingPayload?.funderChecked,
+    funderDepth: input.funderDepth !== undefined ? input.funderDepth : existingPayload?.funderDepth,
   }
 
   // Bookmark row first — shared list / Open dialog must not depend on tape fitting.
@@ -356,6 +360,7 @@ export async function importSavedVault(vault: SavedVault): Promise<number> {
       capped: payload.capped,
       funderRevision: payload.funderRevision,
       funderChecked: payload.funderChecked,
+      funderDepth: payload.funderDepth,
       savedAt: payload.savedAt || metaFromVault?.savedAt,
       starred: Boolean(metaFromVault?.starred),
     })

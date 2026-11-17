@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-12"
+export const HELP_UPDATED_AT = "2026-11-16"
 
 export type HelpExample = {
   title: string
@@ -75,7 +75,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Etherscan’s gas tracker shows the network base-fee average. Individual swaps — especially MEV / sniper bots — often tip far higher, so Gas Price can be 1 gwei or 28 gwei in the same minute.",
       "When gas lookup is on, Pair Sheet retries missing receipts after load and, for older saves, can recalculate gas and ask whether to save the update.",
       "Maker shows the wallet; the number is how many of this pool’s loaded txs that wallet made. Team icons mark the token deployer / first-LP wallet; the red robot marks front-running MEV legs.",
-      "Funded by is the address that first sent native currency into the maker — the earliest successful normal transfer or internal transfer, including ETH attached when a contract was created. A later top-up is not used. Opening a saved pair asks before refreshing Funded by or gas. Keep saved data leaves the tape as stored. Update shows that tape immediately and replaces each row as its new value arrives, then stores it. Load Funded by still runs the check on demand.",
+      "Funded by is the address that first sent native currency into the maker — the earliest successful normal transfer or internal transfer, including ETH attached when a contract was created. A later top-up is not used. Depth 1 is that funder. Depth 2 is the funder of that funder (maker 0x123 → 0x456 → the wallet that first funded 0x456). The column shows the depth-N address, and the label adds “via” for the hops in between. If a hop fails, that maker stays blank and is retried — a shallower wallet is never shown as the depth-N result. Etherscan keys (saved and deleted on this browser, not synced) are used in parallel; without keys the public explorers are used. Changing depth asks you to Load Funded by again. Opening a saved pair asks before refreshing Funded by or gas. Keep saved data leaves the tape as stored. Update shows that tape immediately and replaces each row as its new value arrives, then stores it.",
       "Others includes >>. Click >> on a row to copy that transaction into the Blacklist tab (same columns). No checkbox is required. The list is kept on this browser for that pair.",
       "Blacklist sits next to Deep Analysis. Each row has a trash icon that removes that row immediately, with no checkbox. Empty blacklist clears the table immediately.",
       "Calculate Income uses the checked rows of the table you are viewing — the full tape, or only the blacklist.",
@@ -102,8 +102,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: "On Oct 26 16:12:59 EDT a GINNAN sell paid 28.562 gwei effective while the block base fee was ~0.046 gwei — the sender set a 28.562 gwei priority tip. Pair Sheet shows the receipt value; the gas tracker only plots base-fee averages.",
       },
       {
-        title: "Funded by on a busy wallet",
-        body: "A maker can have 100k swaps and still show Unknown if its first ETH arrived as an internal transfer years ago. Opening that saved pair asks first. Keep saved data shows the stored tape. Update leaves that tape on screen and fills each wallet as its funder arrives. The next open does not repeat wallets that already have no ETH credit.",
+        title: "Funded by depth 2",
+        body: "Maker 0x123 was first funded by 0x456. At depth 1 the column is 0x456. At depth 2 it is whoever first funded 0x456, labeled with “via 0x456…”. If the lookup for 0x456 fails, the cell stays empty until the next try — it does not keep 0x456. Save several Etherscan API keys (Etherscan keys) so those hops run at once. Delete removes one key and leaves the others. Keys stay on this browser and are not part of pair sync.",
       },
       {
         title: "Blacklist then income",

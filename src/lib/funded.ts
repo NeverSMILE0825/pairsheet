@@ -42,12 +42,32 @@ export function makerFunderKey(chainId: string, maker: string): string {
  * funders, or if the user asked to load them. Later opens only fill makers
  * that are still blank and have not been checked.
  */
+export const MIN_FUNDER_DEPTH = 1
+export const MAX_FUNDER_DEPTH = 8
+
+export function clampFunderDepth(value: number): number {
+  if (!Number.isFinite(value)) return MIN_FUNDER_DEPTH
+  return Math.min(MAX_FUNDER_DEPTH, Math.max(MIN_FUNDER_DEPTH, Math.floor(value)))
+}
+
+/** Depth 1 is the maker's funder. Deeper depths name each hop so the result can be checked. */
+export function describeFunderPath(path: string[], finalLabel: string): string {
+  if (path.length <= 1) return finalLabel
+  const via = path
+    .slice(0, -1)
+    .map((address) => shortAddress(address))
+    .join(" → ")
+  return `${finalLabel} via ${via}`
+}
+
 export function makersToRefresh(
   chainId: string,
   trades: Array<{ maker: string; fundedByAddress: string | null }>,
   revision: number | undefined,
   checked: string[] | undefined,
   lookupRequested: boolean,
+  savedDepth?: number,
+  depth = MIN_FUNDER_DEPTH,
 ): string[] {
   const funded = new Set<string>()
   const makers: string[] = []
@@ -61,8 +81,11 @@ export function makersToRefresh(
     seen.add(key)
     makers.push(key)
   }
-  const stale = revision !== FUNDER_REVISION
+  const wanted = clampFunderDepth(depth)
+  const depthChanged = chainId !== "solana" && (savedDepth ?? MIN_FUNDER_DEPTH) !== wanted
+  const stale = revision !== FUNDER_REVISION || depthChanged
   if (stale && funded.size === 0 && !lookupRequested) return []
+  if (depthChanged) return makers
   const already = new Set((stale ? [] : (checked ?? [])).map((item) => makerFunderKey(chainId, item)))
   return makers.filter((key) => !already.has(key) && (stale || !funded.has(key)))
 }
@@ -137,42 +160,148 @@ export type FunderResult = {
   failed: string[]
 }
 
+export type FunderLookup = {
+  /** 1 = the maker's funder. 2 = that funder's funder. */
+  depth?: number
+  /** Etherscan API keys. Several keys are used in parallel, one request stream each. */
+  apiKeys?: string[]
+}
+
 export async function resolveFunders(
   chain: ChainConfig,
   makers: string[],
   deadline = Number.POSITIVE_INFINITY,
   earliestTradeSec?: Map<string, number>,
+  lookup: FunderLookup = {},
 ): Promise<FunderResult> {
   if (chain.id === "solana") {
     return resolveSolanaFunders(chain, makers, deadline, earliestTradeSec)
   }
 
+  const depth = clampFunderDepth(lookup.depth ?? MIN_FUNDER_DEPTH)
+  const apiKeys = [...new Set((lookup.apiKeys ?? []).map((key) => key.trim()).filter(Boolean))]
+  const gate = apiKeys.length > 0 ? new ApiGate(apiKeys) : null
   const unique = [...new Set(makers.map((maker) => maker.toLowerCase()).filter(Boolean))]
   const found = new Map<string, Funder>()
   const failed: string[] = []
+  const hopCache = new Map<string, Promise<string | null>>()
   const profiles = new Map<string, Promise<{ name: string | null; ens: string | null; tags: string[] }>>()
-  await mapPool(unique, 3, async (maker) => {
+  const width = gate ? Math.min(8, Math.max(2, apiKeys.length * 2)) : 3
+  await mapPool(unique, width, async (maker) => {
     if (Date.now() > deadline) {
       failed.push(maker)
       return
     }
     try {
-      const rows = await fundingRows(chain, maker)
-      const first = earliestIncoming(maker, rows)
-      if (!first) return
-      const address = first.from.toLowerCase()
+      const path = await funderPath(chain, maker, depth, gate, hopCache, deadline)
+      if (!path) return
+      const address = path[path.length - 1]
       const profile = await cachedFunderProfile(chain, address, profiles)
-      const label = funderLabel(address, {
-        name: first.fromName || profile.name,
-        ens: first.fromEns || profile.ens,
-        tags: first.fromTags?.length ? first.fromTags : profile.tags,
-      })
+      const label = describeFunderPath(
+        path,
+        funderLabel(address, { name: profile.name, ens: profile.ens, tags: profile.tags }),
+      )
       found.set(maker, { address, label })
     } catch {
       failed.push(maker)
     }
   })
   return { found, failed }
+}
+
+/**
+ * Walk `depth` earliest-native-credit hops. A missing hop is "no funder" (null).
+ * A request error throws so the caller retries instead of storing a shorter chain.
+ */
+async function funderPath(
+  chain: ChainConfig,
+  maker: string,
+  depth: number,
+  gate: ApiGate | null,
+  cache: Map<string, Promise<string | null>>,
+  deadline: number,
+): Promise<string[] | null> {
+  return walkFunderDepth(maker, depth, async (current) => {
+    if (Date.now() > deadline) throw new Error("funding lookup timed out")
+    return cachedHop(chain, current, gate, cache)
+  })
+}
+
+function cachedHop(
+  chain: ChainConfig,
+  address: string,
+  gate: ApiGate | null,
+  cache: Map<string, Promise<string | null>>,
+): Promise<string | null> {
+  const key = address.toLowerCase()
+  const existing = cache.get(key)
+  if (existing) return existing
+  const pending = hopFunder(chain, key, gate).catch((error) => {
+    cache.delete(key)
+    throw error
+  })
+  cache.set(key, pending)
+  return pending
+}
+
+async function hopFunder(chain: ChainConfig, address: string, gate: ApiGate | null): Promise<string | null> {
+  if (gate) {
+    try {
+      const rows = await fundingRowsFromEtherscan(chain, address, gate)
+      const first = earliestIncoming(address, rows)
+      // An empty Etherscan answer is final. Do not second-guess it with another explorer.
+      return first ? first.from.toLowerCase() : null
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ""
+      if (/timed out/i.test(message)) throw error
+    }
+  }
+  const rows = await fundingRows(chain, address)
+  const first = earliestIncoming(address, rows)
+  return first ? first.from.toLowerCase() : null
+}
+
+/** Depth hops of the earliest-native-credit rule. A thrown hop is not shortened into a result. */
+export async function walkFunderDepth(
+  start: string,
+  depth: number,
+  hop: (address: string) => Promise<string | null>,
+): Promise<string[] | null> {
+  const path: string[] = []
+  let current = start.toLowerCase()
+  const wanted = clampFunderDepth(depth)
+  for (let hopIndex = 0; hopIndex < wanted; hopIndex += 1) {
+    const next = await hop(current)
+    if (!next) return null
+    const funder = next.toLowerCase()
+    if (path.includes(funder) || funder === start.toLowerCase()) return null
+    path.push(funder)
+    current = funder
+  }
+  return path.length === wanted ? path : null
+}
+
+class ApiGate {
+  private cursor = 0
+  private nextAt = new Map<string, number>()
+
+  constructor(private readonly keys: string[]) {}
+
+  get size(): number {
+    return this.keys.length
+  }
+
+  /** Reserve the next key before awaiting, so parallel callers do not share one slot. */
+  async take(): Promise<string> {
+    const key = this.keys[this.cursor % this.keys.length]
+    this.cursor += 1
+    const at = this.nextAt.get(key) ?? 0
+    const start = Math.max(Date.now(), at)
+    this.nextAt.set(key, start + 220)
+    const wait = start - Date.now()
+    if (wait > 0) await sleep(wait)
+    return key
+  }
 }
 
 const SOLANA_SIG_PAGE = 1000
@@ -401,6 +530,106 @@ function explorerApiBases(chain: ChainConfig): string[] {
  * start of one of those two lists. If the first explorer has no credit, the
  * next explorer is checked the same way.
  */
+async function fundingRowsFromEtherscan(chain: ChainConfig, maker: string, gate: ApiGate): Promise<FundingRow[]> {
+  const [normal, internal] = await Promise.all([
+    firstNativeCreditKeyed(chain, maker, "txlist", gate),
+    firstNativeCreditKeyed(chain, maker, "txlistinternal", gate),
+  ])
+  if (normal.incomplete || internal.incomplete) {
+    throw new Error("funding history was incomplete")
+  }
+  const collected: FundingRow[] = []
+  if (normal.row) collected.push(normal.row)
+  if (internal.row) collected.push(internal.row)
+  return collected
+}
+
+async function firstNativeCreditKeyed(
+  chain: ChainConfig,
+  maker: string,
+  action: "txlist" | "txlistinternal",
+  gate: ApiGate,
+): Promise<{ row: FundingRow | null; incomplete: boolean }> {
+  let startblock = 0
+  let incomplete = false
+  for (let page = 0; page < ACCOUNT_MAX_PAGES; page += 1) {
+    const loaded = await accountPageKeyed(chain, maker, action, startblock, gate)
+    incomplete = incomplete || loaded.incomplete
+    const items = loaded.items
+    if (items.length === 0) return { row: null, incomplete }
+    const blocks = items.map(blockOf).filter((block) => block > 0)
+    if (blocks.length >= 2 && blocks[0] > blocks[blocks.length - 1]) {
+      throw new Error("funding history was not oldest-first")
+    }
+    const rows = items.flatMap((item) => {
+      const parsed = parseExplorer(item)
+      return parsed ? [parsed] : []
+    })
+    const newest = blocks.length > 0 ? blocks[blocks.length - 1] : rows[rows.length - 1]?.blockNumber ?? startblock
+    const first = earliestIncoming(maker, rows)
+    if (first) return { row: first, incomplete }
+    if (items.length < ACCOUNT_PAGE) return { row: null, incomplete }
+    const nextStart = newest + 1
+    if (nextStart <= startblock) return { row: null, incomplete }
+    startblock = nextStart
+  }
+  return { row: null, incomplete: true }
+}
+
+async function accountPageKeyed(
+  chain: ChainConfig,
+  maker: string,
+  action: "txlist" | "txlistinternal",
+  startblock: number,
+  gate: ApiGate,
+): Promise<{ items: unknown[]; incomplete: boolean }> {
+  let last: Error | null = null
+  for (let attempt = 0; attempt < gate.size; attempt += 1) {
+    const key = await gate.take()
+    const params = new URLSearchParams({
+      chainid: String(chain.chainId),
+      module: "account",
+      action,
+      address: maker,
+      startblock: String(startblock),
+      endblock: "99999999",
+      page: "1",
+      offset: String(ACCOUNT_PAGE),
+      sort: "asc",
+      apikey: key,
+    })
+    try {
+      const body = (await fetchFunding(`https://api.etherscan.io/v2/api?${params}`, 1)) as {
+        status?: string
+        message?: string
+        result?: unknown
+      }
+      const message = typeof body.message === "string" ? body.message : ""
+      const result = typeof body.result === "string" ? body.result : ""
+      if (isRateLimited(message, result)) {
+        last = new Error("Etherscan rate limit")
+        continue
+      }
+      const incomplete = /not yet been processed/i.test(message)
+      if (Array.isArray(body.result)) return { items: body.result, incomplete }
+      if (/no transactions|no records|no internal/i.test(result)) return { items: [], incomplete }
+      if (body.status === "0" || body.message === "NOTOK") {
+        last = new Error(result || message || "funding lookup failed")
+        continue
+      }
+      return { items: [], incomplete }
+    } catch (error) {
+      last = error instanceof Error ? error : new Error("funding lookup failed")
+      if (!isRateLimited(last.message, "")) throw last
+    }
+  }
+  throw last ?? new Error("Etherscan rate limit")
+}
+
+function isRateLimited(message: string, result: string): boolean {
+  return /rate limit|max calls|too many|429/i.test(`${message} ${result}`)
+}
+
 async function fundingRows(chain: ChainConfig, maker: string): Promise<FundingRow[]> {
   const bases = explorerApiBases(chain)
   if (bases.length === 0) return []
