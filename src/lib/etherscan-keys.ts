@@ -70,29 +70,38 @@ export type EtherscanKeyPaste = {
   invalid: number
 }
 
-/** One key per line, or several on a line. A name may sit before its key: `Main ABC...`. */
+const KEY_RE = /[A-Za-z0-9]{20,80}/g
+
+/** One key per line, several on a line, or a key buried in `apikey=` / quotes. A name may sit beside one key. */
 export function parseEtherscanKeyPaste(text: string): { entries: Array<{ name: string; key: string }>; invalid: number } {
   const entries: Array<{ name: string; key: string }> = []
   const seen = new Set<string>()
   let invalid = 0
-  for (const line of text.split(/\r?\n/)) {
-    const parts = line.trim().split(/[\s,;]+/).filter(Boolean)
-    const pendingName: string[] = []
-    for (const part of parts) {
-      const key = normalizeEtherscanKey(part)
-      if (key) {
-        if (!seen.has(key)) {
-          seen.add(key)
-          entries.push({ name: pendingName.join(" "), key })
-        }
-        pendingName.length = 0
-        continue
-      }
-      if (part.length < 20) pendingName.push(part)
-      else {
-        invalid += 1
-        pendingName.length = 0
-      }
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const found: string[] = []
+    for (const match of line.matchAll(KEY_RE)) {
+      const key = normalizeEtherscanKey(match[0])
+      if (key) found.push(key)
+    }
+    if (found.length === 0) {
+      if (line.length >= 8) invalid += 1
+      continue
+    }
+    const label =
+      found.length === 1
+        ? line
+            .replace(found[0], " ")
+            .replace(/[^\w .+-]+/g, " ")
+            .replace(/\b(api\s*key|apikey|key)\b/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+        : ""
+    for (const key of found) {
+      if (seen.has(key)) continue
+      seen.add(key)
+      entries.push({ name: label, key })
     }
   }
   return { entries, invalid }
@@ -125,6 +134,117 @@ export function saveEtherscanKeys(
 
 export function deleteEtherscanKey(keys: EtherscanKey[], id: string): EtherscanKey[] {
   return keys.filter((row) => row.id !== id)
+}
+
+const KEY_DB = "pairsheet-etherscan-keys"
+const KEY_STORE = "keys"
+const KEY_RECORD = "list"
+
+function openKeyDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(KEY_DB, 1)
+    request.onerror = () => reject(request.error ?? new Error("Could not open key storage."))
+    request.onsuccess = () => resolve(request.result)
+    request.onupgradeneeded = () => {
+      const db = request.result
+      if (!db.objectStoreNames.contains(KEY_STORE)) db.createObjectStore(KEY_STORE)
+    }
+  })
+}
+
+async function readKeyDb(): Promise<EtherscanKey[]> {
+  if (typeof indexedDB === "undefined") return []
+  const db = await openKeyDb()
+  try {
+    const tx = db.transaction(KEY_STORE, "readonly")
+    const row = await idbRequest(tx.objectStore(KEY_STORE).get(KEY_RECORD) as IDBRequest<EtherscanKey[] | undefined>)
+    await idbDone(tx)
+    return Array.isArray(row) ? row.flatMap(storedKey) : []
+  } finally {
+    db.close()
+  }
+}
+
+async function writeKeyDb(keys: EtherscanKey[]): Promise<void> {
+  if (typeof indexedDB === "undefined") return
+  const db = await openKeyDb()
+  try {
+    const tx = db.transaction(KEY_STORE, "readwrite")
+    tx.objectStore(KEY_STORE).put(keys, KEY_RECORD)
+    await idbDone(tx)
+  } finally {
+    db.close()
+  }
+}
+
+function storedKey(item: EtherscanKey): EtherscanKey[] {
+  const key = item && typeof item.key === "string" ? normalizeEtherscanKey(item.key) : null
+  if (!key || !item.id) return []
+  return [
+    {
+      id: String(item.id),
+      name: typeof item.name === "string" ? item.name.trim() : "",
+      key,
+      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
+    },
+  ]
+}
+
+function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error("Key storage request failed."))
+  })
+}
+
+function idbDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("Key storage failed."))
+    tx.onabort = () => reject(tx.error ?? new Error("Key storage was aborted."))
+  })
+}
+
+/** Keys saved on this browser. IndexedDB is the copy that survives a reload; localStorage is the fast copy Funded by reads. */
+export async function loadEtherscanKeys(): Promise<EtherscanKey[]> {
+  const local = readEtherscanKeys()
+  let stored: EtherscanKey[] = []
+  try {
+    stored = await readKeyDb()
+  } catch {
+    stored = []
+  }
+  if (stored.length === 0 && local.length > 0) {
+    await writeKeyDb(local).catch(() => undefined)
+    return local
+  }
+  if (stored.length > 0) {
+    try {
+      writeEtherscanKeys(stored)
+    } catch {
+      // IndexedDB still has the list.
+    }
+    return stored
+  }
+  return local
+}
+
+/** Same durability idea as a saved pair: write the list, and fail only when this browser rejected both stores. */
+export async function persistEtherscanKeys(keys: EtherscanKey[]): Promise<void> {
+  let stored = false
+  try {
+    writeEtherscanKeys(keys)
+    stored = true
+  } catch {
+    stored = false
+  }
+  try {
+    await writeKeyDb(keys)
+    stored = true
+  } catch {
+    // localStorage may already hold the list.
+  }
+  if (!stored) throw new Error("This browser blocked saving the keys. Allow site storage, then try Save keys again.")
 }
 
 function newKeyId(): string {

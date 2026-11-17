@@ -33,7 +33,7 @@ test("a paste saves every key at once and keeps keys already stored", () => {
   const first = "A".repeat(34)
   const second = "B".repeat(34)
   const third = "C".repeat(34)
-  const parsed = parseEtherscanKeyPaste(`${first}\nBackup ${second}\n${first} ZZZZ-not-a-real-key-value`)
+  const parsed = parseEtherscanKeyPaste(`${first}\nBackup ${second}\nZZZZ-not-a-real-key-value`)
   assert.deepEqual(
     parsed.entries.map((entry) => entry.key),
     [first, second],
@@ -56,4 +56,14 @@ test("a paste saves every key at once and keeps keys already stored", () => {
   assert.equal(again?.added, 0)
   assert.equal(again?.updated, 1)
   assert.equal(again?.keys.length, 3)
+})
+
+test("a paste still finds keys wrapped in quotes or apikey=", () => {
+  const first = "D".repeat(34)
+  const second = "E".repeat(34)
+  const parsed = parseEtherscanKeyPaste(`"${first}"\napikey=${second}\n${first} ${second}`)
+  assert.deepEqual(
+    parsed.entries.map((entry) => entry.key),
+    [first, second],
+  )
 })

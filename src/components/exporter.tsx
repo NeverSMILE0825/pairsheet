@@ -33,7 +33,7 @@ import {
   type TxColumnId,
 } from "@/lib/table-columns"
 import { FUNDER_REVISION, applyFunderResults, clampFunderDepth, makerFunderKey, makersToRefresh, resolveFunders, type Funder, type FunderLookup } from "@/lib/funded"
-import { readEtherscanKeys, writeEtherscanKeys, type EtherscanKey } from "@/lib/etherscan-keys"
+import { loadEtherscanKeys, persistEtherscanKeys, readEtherscanKeys, type EtherscanKey } from "@/lib/etherscan-keys"
 import { resolveHolderCounts } from "@/lib/holders"
 import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
 import { getSwapPage, mergeNewTrades, newestTradeBlock } from "@/lib/history"
@@ -308,6 +308,7 @@ export function Exporter() {
   const resolvedFunderDepth = useRef<number | undefined>(undefined)
   const [shownFunderDepth, setShownFunderDepth] = useState<number | null>(null)
   const [etherscanKeys, setEtherscanKeys] = useState<EtherscanKey[]>([])
+  const etherscanKeysRef = useRef<EtherscanKey[]>([])
   const [etherscanKeysOpen, setEtherscanKeysOpen] = useState(false)
   const [lookupGas, setLookupGas] = useState(false)
   const [lookupHolders, setLookupHolders] = useState(false)
@@ -402,7 +403,13 @@ export function Exporter() {
       const storedDepth = clampFunderDepth(Number(window.localStorage.getItem(FUNDER_DEPTH_KEY) || "1"))
       funderDepthRef.current = storedDepth
       setFunderDepth(storedDepth)
-      setEtherscanKeys(readEtherscanKeys())
+      const initialKeys = readEtherscanKeys()
+      etherscanKeysRef.current = initialKeys
+      setEtherscanKeys(initialKeys)
+      void loadEtherscanKeys().then((rows) => {
+        etherscanKeysRef.current = rows
+        setEtherscanKeys(rows)
+      })
       setLookupGas(window.localStorage.getItem(LOOKUP_GAS_KEY) === "1")
       setLookupHolders(window.localStorage.getItem(LOOKUP_HOLDERS_KEY) === "1")
       if (window.localStorage.getItem(LIVE_ENABLED_KEY) === "0") setLiveEnabled(false)
@@ -803,9 +810,10 @@ export function Exporter() {
   }
 
   function currentFunderLookup(): FunderLookup {
+    const stored = etherscanKeysRef.current.length > 0 ? etherscanKeysRef.current : readEtherscanKeys()
     return {
       depth: funderDepthRef.current,
-      apiKeys: readEtherscanKeys().map((row) => row.key),
+      apiKeys: stored.map((row) => row.key),
     }
   }
 
@@ -820,8 +828,9 @@ export function Exporter() {
     }
   }
 
-  function changeEtherscanKeys(next: EtherscanKey[]) {
-    writeEtherscanKeys(next)
+  async function changeEtherscanKeys(next: EtherscanKey[]) {
+    await persistEtherscanKeys(next)
+    etherscanKeysRef.current = next
     setEtherscanKeys(next)
   }
 
@@ -4046,6 +4055,7 @@ export function Exporter() {
         keys={etherscanKeys}
         onClose={() => setEtherscanKeysOpen(false)}
         onChange={changeEtherscanKeys}
+        onNotice={flashNotice}
       />
 
       {pool ? (
