@@ -50,6 +50,43 @@ export function clampFunderDepth(value: number): number {
   return Math.min(MAX_FUNDER_DEPTH, Math.max(MIN_FUNDER_DEPTH, Math.floor(value)))
 }
 
+/** Clock for a Funded by run. Paused time is left out. */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  const clock = `${minutes}:${String(seconds).padStart(2, "0")}`
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : clock
+}
+
+export function elapsedMs(startedAt: number, pausedMs: number, pausedAt: number | null, now = Date.now()): number {
+  const end = pausedAt ?? now
+  return Math.max(0, end - startedAt - pausedMs)
+}
+
+/** Blocks new Funded by batches while paused. The batch already in flight still finishes. */
+export class PauseGate {
+  paused = false
+  private waiters: Array<() => void> = []
+
+  pause(): void {
+    this.paused = true
+  }
+
+  resume(): void {
+    this.paused = false
+    const pending = this.waiters.splice(0)
+    for (const wake of pending) wake()
+  }
+
+  async wait(): Promise<void> {
+    while (this.paused) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve))
+    }
+  }
+}
+
 /** Depth 1 is the maker's funder. Deeper depths name each hop so the result can be checked. */
 export function describeFunderPath(path: string[], finalLabel: string): string {
   if (path.length <= 1) return finalLabel

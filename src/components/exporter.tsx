@@ -8,6 +8,7 @@ import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
 import { TeamLabelsDialog } from "@/components/team-labels-dialog"
 import { EtherscanKeysDialog } from "@/components/etherscan-keys-dialog"
+import { FunderProfitPanel } from "@/components/funder-profit-panel"
 import { DateTimeField } from "@/components/datetime-field"
 import { MakerCountButton } from "@/components/maker-summary"
 import { TradeSizeIcon } from "@/components/trade-size-icon"
@@ -32,7 +33,8 @@ import {
   type DaColumnId,
   type TxColumnId,
 } from "@/lib/table-columns"
-import { FUNDER_REVISION, applyFunderResults, clampFunderDepth, makerFunderKey, makersToRefresh, resolveFunders, type Funder, type FunderLookup } from "@/lib/funded"
+import { FUNDER_REVISION, PauseGate, applyFunderResults, clampFunderDepth, elapsedMs, formatElapsed, makerFunderKey, makersToRefresh, resolveFunders, type Funder, type FunderLookup } from "@/lib/funded"
+import { summarizeFunderProfit } from "@/lib/funder-profit"
 import { loadEtherscanKeys, persistEtherscanKeys, readEtherscanKeys, type EtherscanKey } from "@/lib/etherscan-keys"
 import { resolveHolderCounts } from "@/lib/holders"
 import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
@@ -276,6 +278,7 @@ export function Exporter() {
   const [filter, setFilter] = useState<SideFilter>("ALL")
   const [query, setQuery] = useState("")
   const [funder, setFunder] = useState("")
+  const [funderProfitSelected, setFunderProfitSelected] = useState<Set<string>>(() => new Set())
   const [sortKey, setSortKey] = useState<SortKey>("timestamp")
   const [sortDesc, setSortDesc] = useState(true)
   const [minuteSortKey, setMinuteSortKey] = useState<MinuteSortKey>("startMs")
@@ -314,6 +317,11 @@ export function Exporter() {
   const [lookupHolders, setLookupHolders] = useState(false)
   const [copied, setCopied] = useState(false)
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
+  const [fundingPaused, setFundingPaused] = useState(false)
+  const [fundingResult, setFundingResult] = useState<string | null>(null)
+  const [fundingTick, setFundingTick] = useState(0)
+  const fundingPause = useRef(new PauseGate())
+  const fundingClock = useRef({ startedAt: 0, pausedMs: 0, pausedAt: null as number | null })
   const [holdersBusy, setHoldersBusy] = useState(false)
   const [gasBusy, setGasBusy] = useState(false)
   const [confirmExtra, setConfirmExtra] = useState<ExtraLookup | null>(null)
@@ -701,14 +709,14 @@ export function Exporter() {
         flashNotice(`Holders updated for ${pool.baseSymbol} / ${pool.quoteSymbol}.`, "ok")
         return
       }
-      await lookUpFunders(
+      const elapsed = await lookUpFunders(
         chainId,
         rawTrades.map((trade) => trade.maker),
         token,
         rawTrades,
       )
-      if (run.current !== token) return
-      flashNotice(`Funded by updated for ${pool.baseSymbol} / ${pool.quoteSymbol}.`, "ok")
+      if (run.current !== token || elapsed === null) return
+      flashNotice(`Funded by updated for ${pool.baseSymbol} / ${pool.quoteSymbol} in ${formatElapsed(elapsed)}.`, "ok")
     } catch (error) {
       if (run.current !== token) return
       flashNotice(error instanceof Error ? error.message : "Could not load that data.", "error")
@@ -809,6 +817,50 @@ export function Exporter() {
     setPage(0)
   }
 
+  useEffect(() => {
+    if (!funding || fundingPaused) return
+    const timer = window.setInterval(() => setFundingTick(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [funding, fundingPaused])
+
+  function fundingElapsedLabel(): string {
+    const clock = fundingClock.current
+    const now = fundingTick || Date.now()
+    return formatElapsed(elapsedMs(clock.startedAt, clock.pausedMs, clock.pausedAt, now))
+  }
+
+  function beginFundingClock() {
+    fundingPause.current.resume()
+    fundingPause.current = new PauseGate()
+    fundingClock.current = { startedAt: Date.now(), pausedMs: 0, pausedAt: null }
+    setFundingPaused(false)
+    setFundingResult(null)
+    setFundingTick(Date.now())
+  }
+
+  function toggleFundingPause() {
+    const gate = fundingPause.current
+    const clock = fundingClock.current
+    if (!gate.paused) {
+      gate.pause()
+      clock.pausedAt = Date.now()
+      setFundingPaused(true)
+      return
+    }
+    const held = clock.pausedAt ?? Date.now()
+    clock.pausedMs += Date.now() - held
+    clock.pausedAt = null
+    gate.resume()
+    setFundingPaused(false)
+    setFundingTick(Date.now())
+  }
+
+  async function waitUntilFundingRuns(token: number) {
+    while (fundingPause.current.paused && run.current === token) {
+      await fundingPause.current.wait()
+    }
+  }
+
   function currentFunderLookup(): FunderLookup {
     const stored = etherscanKeysRef.current.length > 0 ? etherscanKeysRef.current : readEtherscanKeys()
     return {
@@ -834,9 +886,9 @@ export function Exporter() {
     setEtherscanKeys(next)
   }
 
-  async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []) {
+  async function lookUpFunders(chainId: string, makers: string[], token: number, loaded: Trade[] = []): Promise<number | null> {
     const chain = getChain(chainId)
-    if (!chain) return
+    if (!chain) return null
     const solana = chain.id === "solana"
     let pending = [
       ...new Set(
@@ -857,17 +909,21 @@ export function Exporter() {
     }
     const total = pending.length
     let done = 0
-    if (total === 0) return
+    if (total === 0) return null
     const lookup = currentFunderLookup()
+    beginFundingClock()
     setFunding({ done, total })
 
     for (let pass = 0; pass < FUNDER_PASSES && pending.length > 0 && run.current === token; pass += 1) {
-      if (pass > 0) await new Promise((resolve) => setTimeout(resolve, FUNDER_RETRY_MS * pass))
+      if (pass > 0) await waitUntilFundingRuns(token)
+      if (pass > 0 && run.current === token) await new Promise((resolve) => setTimeout(resolve, FUNDER_RETRY_MS * pass))
       const batches = chunk(pending, FUNDER_BATCH)
       const retry: string[] = []
       let next = 0
       const worker = async () => {
-        while (next < batches.length && run.current === token) {
+        while (run.current === token) {
+          await waitUntilFundingRuns(token)
+          if (run.current !== token || next >= batches.length) return
           const batch = batches[next]
           next += 1
           try {
@@ -902,14 +958,17 @@ export function Exporter() {
       await Promise.all(Array.from({ length: FUNDER_PARALLEL }, worker))
       pending = retry
     }
-    if (run.current === token) {
-      setFunding(null)
-      if (pending.length === 0) {
-        const depth = clampFunderDepth(lookup.depth ?? 1)
-        resolvedFunderDepth.current = depth
-        setShownFunderDepth(depth)
-      }
+    if (run.current !== token) return null
+    const elapsed = elapsedMs(fundingClock.current.startedAt, fundingClock.current.pausedMs, fundingClock.current.pausedAt)
+    setFunding(null)
+    setFundingPaused(false)
+    setFundingResult(`Funded by finished in ${formatElapsed(elapsed)}.`)
+    if (pending.length === 0) {
+      const depth = clampFunderDepth(lookup.depth ?? 1)
+      resolvedFunderDepth.current = depth
+      setShownFunderDepth(depth)
     }
+    return elapsed
   }
 
   async function lookUpHolders(chainId: string, view: PoolView, loaded: Trade[], token: number) {
@@ -951,12 +1010,16 @@ export function Exporter() {
     setShownFunderDepth(null)
     setFacts(EMPTY_FACTS)
     setFunder("")
+    setFunderProfitSelected(new Set())
     setSelected(new Set())
     selectionAnchor.current = null
     setShowSelectedOnly(false)
     setShowMevOnly(false)
     setIncome(null)
     setFunding(null)
+    setFundingResult(null)
+    setFundingPaused(false)
+    fundingPause.current.resume()
     setHoldersBusy(false)
     setGasBusy(false)
     setProgress("")
@@ -1190,6 +1253,11 @@ export function Exporter() {
   const activeTape = viewingBlacklist ? blacklistFiltered : filtered
   const activeSelected = viewingBlacklist ? blacklistSelected : selected
   const labelNet = activeLabel ? netQuoteFlow(activeTape) : null
+  const funderProfitTape = viewingBlacklist ? blacklistTrades : trades
+  const funderProfit = useMemo(
+    () => summarizeFunderProfit(funderProfitTape, funderProfitSelected),
+    [funderProfitTape, funderProfitSelected],
+  )
   const labelsByMaker = useMemo(() => {
     const map = new Map<string, string[]>()
     for (const label of teamLabels) {
@@ -1739,9 +1807,12 @@ export function Exporter() {
     let unknown = 0
     const total = job.funderTargets.length
     let done = 0
+    beginFundingClock()
     setFunding({ done, total })
     const batchSize = 8
     for (let index = 0; index < job.funderTargets.length; index += batchSize) {
+      if (run.current !== job.token) return
+      await waitUntilFundingRuns(job.token)
       if (run.current !== job.token) return
       const batch = job.funderTargets.slice(index, index + batchSize)
       let batchFound = new Map<string, Funder>()
@@ -1776,14 +1847,18 @@ export function Exporter() {
       setFunding({ done: Math.max(done, updated + unknown), total })
     }
     if (run.current !== job.token) return
+    const elapsed = elapsedMs(fundingClock.current.startedAt, fundingClock.current.pausedMs, fundingClock.current.pausedAt)
+    const elapsedLabel = formatElapsed(elapsed)
     setFunding(null)
+    setFundingPaused(false)
+    setFundingResult(`Funded by finished in ${elapsedLabel}.`)
     await refreshSavedList().catch(() => null)
     const unknownNote = unknown > 0 ? ` ${unknown.toLocaleString("en-US")} have no ETH credit.` : ""
     const retryNote = failed.size > 0 ? ` ${failed.size.toLocaleString("en-US")} will be offered again next open.` : ""
     flashNotice(
       updated > 0
-        ? `Updated Funded by for ${updated.toLocaleString("en-US")} wallet${updated === 1 ? "" : "s"} on ${pairLabel}.${unknownNote}${retryNote}`
-        : `Funded by check finished for ${pairLabel}.${unknownNote}${retryNote}`,
+        ? `Updated Funded by for ${updated.toLocaleString("en-US")} wallet${updated === 1 ? "" : "s"} on ${pairLabel} in ${elapsedLabel}.${unknownNote}${retryNote}`
+        : `Funded by check finished for ${pairLabel} in ${elapsedLabel}.${unknownNote}${retryNote}`,
       failed.size > 0 ? "info" : "ok",
     )
   }
@@ -2663,8 +2738,18 @@ export function Exporter() {
           Counting exact base-token holders at each transaction…
         </p>
       ) : funding ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="status">
+          <span>
+            {fundingPaused ? "Paused" : "Finding who funded each wallet"}: {funding.done.toLocaleString("en-US")} of{" "}
+            {funding.total.toLocaleString("en-US")} · {fundingElapsedLabel()}
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={toggleFundingPause}>
+            {fundingPaused ? "Resume" : "Pause"}
+          </Button>
+        </p>
+      ) : fundingResult ? (
         <p className="text-sm text-muted-foreground" role="status">
-          Finding who funded each wallet: {funding.done.toLocaleString("en-US")} of {funding.total.toLocaleString("en-US")}
+          {fundingResult}
         </p>
       ) : null}
 
@@ -3429,6 +3514,29 @@ export function Exporter() {
               </div>
             ) : null}
           </div>
+          ) : null}
+
+          {tableView !== "minutes" && funderProfitTape.length > 0 ? (
+            <FunderProfitPanel
+              rows={funderProfit.rows}
+              selected={funderProfitSelected}
+              selectedProfit={funderProfit.selectedProfit}
+              excludedProfit={funderProfit.excludedProfit}
+              selectedSwaps={funderProfit.selectedSwaps}
+              excludedSwaps={funderProfit.excludedSwaps}
+              quoteSymbol={pool.quoteSymbol}
+              needsLookup={funderProfit.rows.every((row) => row.address === null)}
+              onToggle={(key) => {
+                setFunderProfitSelected((current) => {
+                  const next = new Set(current)
+                  if (next.has(key)) next.delete(key)
+                  else next.add(key)
+                  return next
+                })
+              }}
+              onSelectAll={() => setFunderProfitSelected(new Set(funderProfit.rows.map((row) => row.key)))}
+              onClear={() => setFunderProfitSelected(new Set())}
+            />
           ) : null}
 
           {tableView !== "minutes" && income ? (

@@ -58,6 +58,20 @@ test("a paste saves every key at once and keeps keys already stored", () => {
   assert.equal(again?.keys.length, 3)
 })
 
+test("a key file with a header and a BOM still loads every key", () => {
+  const first = "F".repeat(34)
+  const second = "G".repeat(34)
+  const parsed = parseEtherscanKeyPaste(`\uFEFF# etherscan keys\r\n${first}\r\n${second}\r\n`)
+  assert.deepEqual(
+    parsed.entries.map((entry) => entry.key),
+    [first, second],
+  )
+  assert.equal(parsed.invalid, 1)
+  const saved = saveEtherscanKeys([], { text: `\uFEFF${first}\r\n${second}` }, "t4")
+  assert.equal(saved?.added, 2)
+  assert.equal(saved?.keys.length, 2)
+})
+
 test("a paste still finds keys wrapped in quotes or apikey=", () => {
   const first = "D".repeat(34)
   const second = "E".repeat(34)

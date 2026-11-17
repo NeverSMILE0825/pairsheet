@@ -77,7 +77,7 @@ export function parseEtherscanKeyPaste(text: string): { entries: Array<{ name: s
   const entries: Array<{ name: string; key: string }> = []
   const seen = new Set<string>()
   let invalid = 0
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (const rawLine of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line) continue
     const found: string[] = []

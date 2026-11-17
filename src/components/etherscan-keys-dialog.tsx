@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Loader2, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Loader2, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   deleteEtherscanKey,
@@ -28,6 +28,7 @@ export function EtherscanKeysDialog({
   const [text, setText] = useState("")
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; message: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const parsed = useMemo(() => parseEtherscanKeyPaste(`${name}\n${text}`), [name, text])
 
   useEffect(() => {
@@ -41,16 +42,15 @@ export function EtherscanKeysDialog({
 
   if (!open) return null
 
-  async function save() {
+  async function storeKeys(source: string, emptyMessage: string, savedMessage: (added: number, updated: number, invalid: number) => string) {
     const nameIsKey = parseEtherscanKeyPaste(name).entries.length > 0
     const result = saveEtherscanKeys(keys, {
       name: nameIsKey ? "" : name,
-      text: nameIsKey ? `${name}\n${text}` : text,
+      text: source,
     })
     if (!result) {
-      const message = "No API key found. Paste one or more keys, one per line, then click Save keys."
-      setNotice({ tone: "error", message })
-      onNotice?.(message, "error")
+      setNotice({ tone: "error", message: emptyMessage })
+      onNotice?.(emptyMessage, "error")
       return
     }
     setBusy(true)
@@ -58,9 +58,7 @@ export function EtherscanKeysDialog({
       await onChange(result.keys)
       setName("")
       setText("")
-      const kept = result.updated > 0 ? ` ${result.updated.toLocaleString("en-US")} already saved, kept.` : ""
-      const skipped = result.invalid > 0 ? ` ${result.invalid.toLocaleString("en-US")} line(s) were not keys.` : ""
-      const message = `Saved ${result.added.toLocaleString("en-US")} Etherscan key${result.added === 1 ? "" : "s"} on this browser.${kept}${skipped}`
+      const message = savedMessage(result.added, result.updated, result.invalid)
       setNotice({ tone: "ok", message })
       onNotice?.(message, "ok")
     } catch (error) {
@@ -70,6 +68,42 @@ export function EtherscanKeysDialog({
     } finally {
       setBusy(false)
     }
+  }
+
+  function savedSummary(added: number, updated: number, invalid: number): string {
+    const kept = updated > 0 ? ` ${updated.toLocaleString("en-US")} already saved, kept.` : ""
+    const skipped = invalid > 0 ? ` ${invalid.toLocaleString("en-US")} line(s) were not keys.` : ""
+    return `Saved ${added.toLocaleString("en-US")} Etherscan key${added === 1 ? "" : "s"} on this browser.${kept}${skipped}`
+  }
+
+  function save() {
+    const nameIsKey = parseEtherscanKeyPaste(name).entries.length > 0
+    return storeKeys(
+      nameIsKey ? `${name}\n${text}` : text,
+      "No API key found. Paste one or more keys, one per line, then click Save keys.",
+      savedSummary,
+    )
+  }
+
+  async function loadFile(file: File | null) {
+    const input = fileRef.current
+    if (input) input.value = ""
+    if (!file) return
+    let contents = ""
+    try {
+      contents = (await file.text()).replace(/^\uFEFF/, "")
+    } catch {
+      const message = `Could not read ${file.name}.`
+      setNotice({ tone: "error", message })
+      onNotice?.(message, "error")
+      return
+    }
+    const label = file.name
+    await storeKeys(
+      contents,
+      `No API key found in ${label}. Use a text file with one key per line.`,
+      (added, updated, invalid) => `Loaded ${label}. ${savedSummary(added, updated, invalid)}`,
+    )
   }
 
   async function remove(id: string) {
@@ -126,7 +160,7 @@ export function EtherscanKeysDialog({
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {keys.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-              No keys saved yet. Paste keys below, then Save keys. Funded by still works without them, one wallet at a time.
+              No keys saved yet. Paste keys below, or Load file, then they stay on this browser. Funded by still works without them.
             </p>
           ) : (
             <ul className="flex flex-col gap-2">
@@ -179,6 +213,17 @@ export function EtherscanKeysDialog({
             className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,.csv,.text,text/plain"
+              className="hidden"
+              onChange={(event) => void loadFile(event.target.files?.[0] ?? null)}
+            />
+            <Button type="button" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
+              <Upload className="size-3.5" />
+              Load file
+            </Button>
             <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
               Close
             </Button>

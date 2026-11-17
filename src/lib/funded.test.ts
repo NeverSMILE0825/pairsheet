@@ -4,7 +4,10 @@ import {
   FUNDER_REVISION,
   applyFunderResults,
   describeFunderPath,
+  elapsedMs,
   earliestIncoming,
+  formatElapsed,
+  PauseGate,
   fundingRowFromExplorer,
   makersToRefresh,
   walkFunderDepth,
@@ -135,6 +138,25 @@ test("a saved tape is stale when the funded-by depth changed", () => {
     makersToRefresh("ether", [{ maker: "0xAAAA", fundedByAddress: null }], FUNDER_REVISION, ["0xaaaa"], false, 1, 2),
     [],
   )
+})
+
+test("funded by elapsed time skips the paused stretch", async () => {
+  assert.equal(formatElapsed(0), "0:00")
+  assert.equal(formatElapsed(61_400), "1:01")
+  assert.equal(formatElapsed(3_661_000), "1:01:01")
+  assert.equal(elapsedMs(1_000, 500, null, 2_000), 500)
+  assert.equal(elapsedMs(1_000, 0, 1_800, 9_000), 800)
+  const gate = new PauseGate()
+  gate.pause()
+  let released = false
+  const waiting = gate.wait().then(() => {
+    released = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(released, false)
+  gate.resume()
+  await waiting
+  assert.equal(released, true)
 })
 
 test("the earlier credit wins when two lists disagree", () => {
