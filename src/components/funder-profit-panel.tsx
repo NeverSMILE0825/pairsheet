@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { formatQuoteAmount, shortAddress } from "@/lib/format"
-import { UNKNOWN_FUNDER_KEY, type FunderProfitRow } from "@/lib/funder-profit"
+import { UNKNOWN_FUNDER_KEY, sourceClickSelection, type FunderProfitRow } from "@/lib/funder-profit"
 
 export function FunderProfitPanel({
   rows,
@@ -14,6 +14,7 @@ export function FunderProfitPanel({
   quoteSymbol,
   needsLookup,
   onToggle,
+  onAdd,
   onSelectAll,
   onClear,
 }: {
@@ -26,10 +27,12 @@ export function FunderProfitPanel({
   quoteSymbol: string
   needsLookup: boolean
   onToggle: (key: string) => void
+  onAdd: (keys: string[]) => void
   onSelectAll: () => void
   onClear: () => void
 }) {
   const [query, setQuery] = useState("")
+  const anchor = useRef<number | null>(null)
   const needle = query.trim().toLowerCase()
   const visible = useMemo(() => {
     if (!needle) return rows
@@ -38,7 +41,20 @@ export function FunderProfitPanel({
       return row.label.toLowerCase().includes(needle) || address.includes(needle)
     })
   }, [rows, needle])
+  const order = rows.map((row) => row.key).join("\n")
+  useEffect(() => {
+    anchor.current = null
+  }, [order, needle])
   const checked = rows.filter((row) => selected.has(row.key)).length
+
+  function pick(key: string, shiftKey: boolean) {
+    const keys = visible.map((row) => row.key)
+    const choice = sourceClickSelection(keys, anchor.current, keys.indexOf(key), shiftKey)
+    if (!choice) return
+    anchor.current = choice.anchor
+    if (choice.mode === "add") onAdd(choice.keys)
+    else onToggle(choice.keys[0])
+  }
 
   return (
     <section className="rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10" aria-label="Funded by profit">
@@ -46,14 +62,28 @@ export function FunderProfitPanel({
         <div>
           <h2 className="text-sm font-semibold tracking-tight">Funded by profit</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Buys add {quoteSymbol}. Sells subtract it. Adds and removes are left out.
+            Buys add {quoteSymbol}. Sells subtract it. Adds and removes are left out. Click a source, then Shift+click another to check everything between them.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className="text-xs text-foreground underline-offset-2 hover:underline" onClick={onSelectAll}>
+          <button
+            type="button"
+            className="text-xs text-foreground underline-offset-2 hover:underline"
+            onClick={() => {
+              anchor.current = null
+              onSelectAll()
+            }}
+          >
             Select all
           </button>
-          <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={onClear}>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => {
+              anchor.current = null
+              onClear()
+            }}
+          >
             Clear
           </button>
         </div>
@@ -95,12 +125,32 @@ export function FunderProfitPanel({
         ) : (
           visible.map((row) => (
             <li key={row.key}>
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-muted/60">
+              <label
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-muted/60"
+                onMouseDown={(event) => {
+                  if (event.shiftKey) event.preventDefault()
+                }}
+                onClick={(event) => {
+                  if (!event.shiftKey) return
+                  event.preventDefault()
+                  pick(row.key, true)
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={selected.has(row.key)}
-                  onChange={() => onToggle(row.key)}
                   aria-label={`Include ${row.label}`}
+                  title="Click to toggle. Shift+click to select a range."
+                  onChange={(event) => {
+                    if (event.nativeEvent instanceof MouseEvent && event.nativeEvent.shiftKey) return
+                    pick(row.key, false)
+                  }}
+                  onClick={(event) => {
+                    if (!event.shiftKey) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    pick(row.key, true)
+                  }}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm">{sourceTitle(row)}</span>

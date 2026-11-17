@@ -28,6 +28,25 @@ export type FunderProfitSummary = {
   excludedSwaps: number
 }
 
+/**
+ * Plain click toggles one source. Shift+click checks every source from the
+ * anchor through this one, in the order shown.
+ */
+export function sourceClickSelection(
+  keys: readonly string[],
+  anchor: number | null,
+  index: number,
+  shiftKey: boolean,
+): { mode: "add" | "toggle"; keys: string[]; anchor: number } | null {
+  if (index < 0 || index >= keys.length) return null
+  if (shiftKey && anchor !== null && anchor >= 0 && anchor < keys.length) {
+    const from = Math.min(anchor, index)
+    const to = Math.max(anchor, index)
+    return { mode: "add", keys: keys.slice(from, to + 1), anchor: index }
+  }
+  return { mode: "toggle", keys: [keys[index]], anchor: index }
+}
+
 export function funderProfitKey(trade: { fundedByAddress: string | null }): string {
   const address = trade.fundedByAddress?.trim() ?? ""
   if (!address) return UNKNOWN_FUNDER_KEY

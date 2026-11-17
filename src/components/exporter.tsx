@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, Calculator, CalendarRange, ChevronLeft, ChevronRight, Cloud, Download, ExternalLink, FileText, FolderOpen, Loader2, RefreshCw, Save, Star, Trash2, Upload, Users, X } from "lucide-react"
 import { MevBotIcon } from "@/components/mev-bot-icon"
+import { DextoolsBotIcon } from "@/components/dextools-bot-icon"
+import { DextoolsBotPanel } from "@/components/dextools-bot-panel"
 import { BehaviourReportDialog } from "@/components/behaviour-report-dialog"
 import { ColumnsMenu } from "@/components/columns-menu"
 import { HelpDialogButton } from "@/components/help-dialog"
@@ -35,6 +37,7 @@ import {
 } from "@/lib/table-columns"
 import { FUNDER_REVISION, PauseGate, applyFunderResults, clampFunderDepth, elapsedMs, formatElapsed, makerFunderKey, makersToRefresh, resolveFunders, type Funder, type FunderLookup } from "@/lib/funded"
 import { summarizeFunderProfit } from "@/lib/funder-profit"
+import { applyDextoolsBots, fetchDextoolsBotFlags, summarizeDextoolsBotProfit } from "@/lib/dextools-bots"
 import { loadEtherscanKeys, persistEtherscanKeys, readEtherscanKeys, type EtherscanKey } from "@/lib/etherscan-keys"
 import { resolveHolderCounts } from "@/lib/holders"
 import { addBlacklistIds, blacklistPoolKey, readBlacklist, removeBlacklistIds, writeBlacklist } from "@/lib/blacklist"
@@ -319,6 +322,7 @@ export function Exporter() {
   const [funding, setFunding] = useState<{ done: number; total: number } | null>(null)
   const [fundingPaused, setFundingPaused] = useState(false)
   const [fundingResult, setFundingResult] = useState<string | null>(null)
+  const [botScan, setBotScan] = useState(false)
   const [fundingTick, setFundingTick] = useState(0)
   const fundingPause = useRef(new PauseGate())
   const fundingClock = useRef({ startedAt: 0, pausedMs: 0, pausedAt: null as number | null })
@@ -642,6 +646,9 @@ export function Exporter() {
         setProgress(`Updating gas, holders, and funded by for ${added.toLocaleString("en-US")} new transaction${added === 1 ? "" : "s"}…`)
         enriched = await enrichNewTrades(api.pool.chainId, api.pool, snapshot, beforeIds, currentFunderLookup())
         if (isStopped()) return false
+        const flags = await fetchDextoolsBotFlags(api.pool.chainId, api.pool.address, { stopBeforeBlock: since }).catch(() => null)
+        if (isStopped()) return false
+        if (flags) enriched = applyDextoolsBots(enriched, flags)
         enriched = polishTape(api.pool, enriched)
         tradesRef.current = enriched
         setTrades(enriched)
@@ -1018,6 +1025,7 @@ export function Exporter() {
     setIncome(null)
     setFunding(null)
     setFundingResult(null)
+    setBotScan(false)
     setFundingPaused(false)
     fundingPause.current.resume()
     setHoldersBusy(false)
@@ -1054,6 +1062,7 @@ export function Exporter() {
       const seen = new Set<string>()
       let chainId = ""
       let poolView: PoolView | null = null
+      let botFlagsPromise: Promise<Map<string, boolean> | null> | null = null
       do {
         let body: SwapsResponse | null = null
         let failure = "Could not load swaps."
@@ -1072,6 +1081,10 @@ export function Exporter() {
         chainId = body.pool.chainId
         poolView = body.pool
         setPool(body.pool)
+        if (!botFlagsPromise) {
+          setBotScan(true)
+          botFlagsPromise = fetchDextoolsBotFlags(body.pool.chainId, body.pool.address).catch(() => null)
+        }
         if (body.warning) setWarning(body.warning)
         for (const trade of body.trades) {
           if (seen.has(trade.id)) continue
@@ -1116,6 +1129,19 @@ export function Exporter() {
         }
       }
       if (run.current !== token) return
+      if (botFlagsPromise) {
+        const flags = await botFlagsPromise
+        if (run.current !== token) return
+        if (flags) finalTrades = applyDextoolsBots(finalTrades, flags)
+        else {
+          setWarning((current) =>
+            [current, "Bot / Smart contract marks could not be loaded from DEXTools."]
+              .filter(Boolean)
+              .join(" "),
+          )
+        }
+      }
+      setBotScan(false)
       if (poolView) finalTrades = polishTape(poolView, finalTrades)
       setTrades(finalTrades)
       setPhase("done")
@@ -1134,6 +1160,7 @@ export function Exporter() {
       }
     } catch (loadError) {
       if (run.current !== token) return
+      setBotScan(false)
       setPhase("error")
       setError(loadError instanceof Error ? loadError.message : "Could not load swaps.")
     }
@@ -1258,6 +1285,7 @@ export function Exporter() {
     () => summarizeFunderProfit(funderProfitTape, funderProfitSelected),
     [funderProfitTape, funderProfitSelected],
   )
+  const botProfit = useMemo(() => summarizeDextoolsBotProfit(funderProfitTape), [funderProfitTape])
   const labelsByMaker = useMemo(() => {
     const map = new Map<string, string[]>()
     for (const label of teamLabels) {
@@ -1903,6 +1931,27 @@ export function Exporter() {
         const repairGas = lookupGas && tradesNeedGasRepair(saved.trades)
         const gasCount = repairGas ? countMissingGas(saved.trades) : 0
         flashNotice(`Opened saved ${pairLabel} from ${formatSavedAt(saved.savedAt)}.`, "ok")
+        const needsBots = saved.trades.some(
+          (trade) => (trade.type === "BUY" || trade.type === "SELL") && trade.dextoolsBot == null,
+        )
+        if (needsBots) {
+          setBotScan(true)
+          void fetchDextoolsBotFlags(saved.pool.chainId, saved.pool.address)
+            .then((flags) => {
+              if (run.current !== token) return
+              const next = applyDextoolsBots(tradesRef.current, flags)
+              publishOpenTrades(next)
+              setBotScan(false)
+              void persistCaughtUpTape(saved.pool, next, {
+                facts: saved.facts,
+                warning: saved.warning,
+                capped: saved.capped,
+              })
+            })
+            .catch(() => {
+              if (run.current === token) setBotScan(false)
+            })
+        }
         if (funderTargets.length > 0 || repairGas) {
           savedUpdateJob.current = {
             token,
@@ -3517,6 +3566,10 @@ export function Exporter() {
           ) : null}
 
           {tableView !== "minutes" && funderProfitTape.length > 0 ? (
+            <DextoolsBotPanel profit={botProfit} quoteSymbol={pool.quoteSymbol} scanning={botScan} />
+          ) : null}
+
+          {tableView !== "minutes" && funderProfitTape.length > 0 ? (
             <FunderProfitPanel
               rows={funderProfit.rows}
               selected={funderProfitSelected}
@@ -3531,6 +3584,13 @@ export function Exporter() {
                   const next = new Set(current)
                   if (next.has(key)) next.delete(key)
                   else next.add(key)
+                  return next
+                })
+              }}
+              onAdd={(keys) => {
+                setFunderProfitSelected((current) => {
+                  const next = new Set(current)
+                  for (const key of keys) next.add(key)
                   return next
                 })
               }}
@@ -4025,9 +4085,7 @@ export function Exporter() {
                         {showTx("others") ? (
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className="inline-flex items-center gap-2">
-                              {trade.makerTags.includes("bot") ? (
-                                <MevBotIcon drainEth={mevDrainById.get(trade.id)} className="size-4" />
-                              ) : null}
+                              {trade.dextoolsBot ? <DextoolsBotIcon className="size-[18px]" /> : null}
                               {trade.makerTags.includes("team") ? (
                                 <span
                                   className="text-amber-400"

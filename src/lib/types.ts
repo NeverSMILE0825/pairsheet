@@ -80,6 +80,11 @@ export type Trade = {
   txHash: string
   fundedBy: string | null
   fundedByAddress: string | null
+  /**
+   * DEXTools Others-column Bot / Smart contract mark (`others.bot`).
+   * null means that swap was not on the DEXTools tape we read.
+   */
+  dextoolsBot?: boolean | null
   /** Effective gas price for this tx (gwei). Null on Solana / when receipt missing. */
   gasPriceGwei: string | null
   /** Exact fee for this tx in wei (string). Shared across rows with the same txHash. */

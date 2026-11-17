@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { UNKNOWN_FUNDER_KEY, funderProfitKey, summarizeFunderProfit, type FunderProfitTrade } from "./funder-profit"
+import { UNKNOWN_FUNDER_KEY, funderProfitKey, sourceClickSelection, summarizeFunderProfit, type FunderProfitTrade } from "./funder-profit"
 
 const A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -42,6 +42,18 @@ test("funded by profit adds buys, subtracts sells, and splits selected from the 
     summary.rows.map((item) => item.key),
     [A, B, UNKNOWN_FUNDER_KEY],
   )
+})
+
+test("shift-click checks every funded-by source between the first and last click", () => {
+  const keys = ["a", "b", "c", "d", "e"]
+  const first = sourceClickSelection(keys, null, 1, false)
+  assert.deepEqual(first, { mode: "toggle", keys: ["b"], anchor: 1 })
+  const range = sourceClickSelection(keys, first?.anchor ?? null, 4, true)
+  assert.deepEqual(range, { mode: "add", keys: ["b", "c", "d", "e"], anchor: 4 })
+  const upward = sourceClickSelection(keys, 4, 0, true)
+  assert.deepEqual(upward, { mode: "add", keys: ["a", "b", "c", "d", "e"], anchor: 0 })
+  assert.equal(sourceClickSelection(keys, 0, 2, false)?.mode, "toggle")
+  assert.equal(sourceClickSelection(keys, null, 9, true), null)
 })
 
 test("an empty selection puts every source in the excluded total", () => {
