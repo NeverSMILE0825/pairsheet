@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-17T16:44:18.151Z",
+  "updatedAt": "2026-11-17T16:44:37.771Z",
   "bookmarks": [
     {
       "id": "ether:0xef3813ee59ebf62ffdc8c4bced40cdd53180668358710b74fa105619eaedfaed",
@@ -13,7 +13,7 @@
       "baseSymbol": "GTA",
       "quoteSymbol": "ETH",
       "tradeCount": 511,
-      "starred": false
+      "starred": true
     },
     {
       "id": "ether:0x945f0d74052c249572cf9a555b11d431cde2d2c2ce49f678a3bdd68b03e3a770",
