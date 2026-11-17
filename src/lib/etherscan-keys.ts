@@ -63,6 +63,66 @@ export function saveEtherscanKey(
   return [{ id, name, key, updatedAt: now }, ...next]
 }
 
+export type EtherscanKeyPaste = {
+  keys: EtherscanKey[]
+  added: number
+  updated: number
+  invalid: number
+}
+
+/** One key per line, or several on a line. A name may sit before its key: `Main ABC...`. */
+export function parseEtherscanKeyPaste(text: string): { entries: Array<{ name: string; key: string }>; invalid: number } {
+  const entries: Array<{ name: string; key: string }> = []
+  const seen = new Set<string>()
+  let invalid = 0
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.trim().split(/[\s,;]+/).filter(Boolean)
+    const pendingName: string[] = []
+    for (const part of parts) {
+      const key = normalizeEtherscanKey(part)
+      if (key) {
+        if (!seen.has(key)) {
+          seen.add(key)
+          entries.push({ name: pendingName.join(" "), key })
+        }
+        pendingName.length = 0
+        continue
+      }
+      if (part.length < 20) pendingName.push(part)
+      else {
+        invalid += 1
+        pendingName.length = 0
+      }
+    }
+  }
+  return { entries, invalid }
+}
+
+/** Save every key in a paste. Existing keys stay. A repeated key updates that row. */
+export function saveEtherscanKeys(
+  keys: EtherscanKey[],
+  input: { name?: string; text: string },
+  now = new Date().toISOString(),
+): EtherscanKeyPaste | null {
+  const parsed = parseEtherscanKeyPaste(input.text)
+  if (parsed.entries.length === 0) return null
+  const shared = (input.name ?? "").trim()
+  let next = keys
+  let added = 0
+  let updated = 0
+  for (let index = parsed.entries.length - 1; index >= 0; index -= 1) {
+    const entry = parsed.entries[index]
+    const had = next.some((row) => row.key === entry.key)
+    const name = entry.name || (parsed.entries.length === 1 ? shared : "")
+    const saved = saveEtherscanKey(next, { name, key: entry.key }, now)
+    if (!saved) continue
+    next = saved
+    if (had) updated += 1
+    else added += 1
+  }
+  return { keys: next, added, updated, invalid: parsed.invalid }
+}
+
 export function deleteEtherscanKey(keys: EtherscanKey[], id: string): EtherscanKey[] {
   return keys.filter((row) => row.id !== id)
 }

@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   deleteEtherscanKey,
   maskEtherscanKey,
-  saveEtherscanKey,
+  parseEtherscanKeyPaste,
+  saveEtherscanKeys,
   type EtherscanKey,
 } from "@/lib/etherscan-keys"
 
@@ -22,8 +23,9 @@ export function EtherscanKeysDialog({
   onChange: (next: EtherscanKey[]) => void
 }) {
   const [name, setName] = useState("")
-  const [key, setKey] = useState("")
+  const [text, setText] = useState("")
   const [notice, setNotice] = useState<string | null>(null)
+  const parsed = useMemo(() => parseEtherscanKeyPaste(text), [text])
 
   useEffect(() => {
     if (!open) return
@@ -37,15 +39,19 @@ export function EtherscanKeysDialog({
   if (!open) return null
 
   function save() {
-    const next = saveEtherscanKey(keys, { name, key })
-    if (!next) {
-      setNotice("Paste a full Etherscan API key (letters and numbers, at least 20 characters).")
+    const result = saveEtherscanKeys(keys, { name, text })
+    if (!result) {
+      setNotice("Paste one or more Etherscan API keys, one per line.")
       return
     }
-    onChange(next)
+    onChange(result.keys)
     setName("")
-    setKey("")
-    setNotice("Saved on this browser. Keys are not synced to GitHub.")
+    setText("")
+    const invalid = result.invalid > 0 ? ` ${result.invalid.toLocaleString("en-US")} line(s) were not keys.` : ""
+    const updated = result.updated > 0 ? ` ${result.updated.toLocaleString("en-US")} already saved, kept.` : ""
+    setNotice(
+      `Saved ${result.added.toLocaleString("en-US")} key${result.added === 1 ? "" : "s"} on this browser.${updated}${invalid} Keys are not synced to GitHub.`,
+    )
   }
 
   return (
@@ -60,7 +66,7 @@ export function EtherscanKeysDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="etherscan-keys-title"
-        className="flex max-h-[min(36rem,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-foreground/10"
+        className="flex max-h-[min(40rem,90vh)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-foreground/10"
       >
         <div className="border-b border-border px-4 py-3">
           <h2 id="etherscan-keys-title" className="text-base font-semibold tracking-tight">
@@ -72,7 +78,7 @@ export function EtherscanKeysDialog({
         </div>
         <div className="grid gap-3 overflow-y-auto px-4 py-3">
           <label className="block text-sm font-medium" htmlFor="etherscan-key-name">
-            Name <span className="font-normal text-muted-foreground">optional</span>
+            Name <span className="font-normal text-muted-foreground">optional, used when you paste one key</span>
           </label>
           <Input
             id="etherscan-key-name"
@@ -81,20 +87,26 @@ export function EtherscanKeysDialog({
             placeholder="Main"
             autoComplete="off"
           />
-          <label className="block text-sm font-medium" htmlFor="etherscan-key-value">
-            API key
-          </label>
-          <Input
+          <div className="flex items-baseline justify-between gap-2">
+            <label className="text-sm font-medium" htmlFor="etherscan-key-value">
+              API keys
+            </label>
+            <span className="text-xs text-muted-foreground">
+              {parsed.entries.length.toLocaleString("en-US")} key{parsed.entries.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <textarea
             id="etherscan-key-value"
-            value={key}
-            onChange={(event) => setKey(event.target.value)}
-            placeholder="Paste an Etherscan API key"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={"One key per line\nABC…\nDEF…"}
             autoComplete="off"
             spellCheck={false}
+            className="h-36 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <div className="flex justify-end">
             <Button type="button" onClick={save}>
-              Save key
+              Save keys
             </Button>
           </div>
           {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
