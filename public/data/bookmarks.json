@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-19T15:19:22.362Z",
+  "updatedAt": "2026-11-19T15:19:32.584Z",
   "bookmarks": [
     {
       "id": "ether:0xed6c13aa281124eeb8cd9195bba31a3a78b1d6a84665fb3da0ad86cd130f6900",
@@ -13,7 +13,7 @@
       "baseSymbol": "mihao",
       "quoteSymbol": "ETH",
       "tradeCount": 14860,
-      "starred": false
+      "starred": true
     },
     {
       "id": "ether:0xef3813ee59ebf62ffdc8c4bced40cdd53180668358710b74fa105619eaedfaed",
