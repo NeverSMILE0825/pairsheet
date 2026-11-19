@@ -1,11 +1,24 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-17T16:44:37.771Z",
+  "updatedAt": "2026-11-19T15:19:22.362Z",
   "bookmarks": [
+    {
+      "id": "ether:0xed6c13aa281124eeb8cd9195bba31a3a78b1d6a84665fb3da0ad86cd130f6900",
+      "url": "https://www.dextools.io/app/ether/pair-explorer/0xed6c13aa281124eeb8cd9195bba31a3a78b1d6a84665fb3da0ad86cd130f6900",
+      "savedAt": "2026-11-19T15:19:16.241Z",
+      "chainId": "ether",
+      "chainName": "Ethereum",
+      "address": "0xed6c13aa281124eeb8cd9195bba31a3a78b1d6a84665fb3da0ad86cd130f6900",
+      "dex": "Uniswap V4 (Ethereum)",
+      "baseSymbol": "mihao",
+      "quoteSymbol": "ETH",
+      "tradeCount": 14860,
+      "starred": false
+    },
     {
       "id": "ether:0xef3813ee59ebf62ffdc8c4bced40cdd53180668358710b74fa105619eaedfaed",
       "url": "https://www.dextools.io/app/ether/pair-explorer/0xef3813ee59ebf62ffdc8c4bced40cdd53180668358710b74fa105619eaedfaed",
-      "savedAt": "2026-11-17T16:44:12.620Z",
+      "savedAt": "2026-11-17T16:44:46.412Z",
       "chainId": "ether",
       "chainName": "Ethereum",
       "address": "0xef3813ee59ebf62ffdc8c4bced40cdd53180668358710b74fa105619eaedfaed",
