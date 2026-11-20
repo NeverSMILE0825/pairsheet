@@ -57,58 +57,46 @@ export function FunderProfitPanel({
   }
 
   return (
-    <section className="rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10" aria-label="Funded by profit">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight">Funded by profit</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Buys add {quoteSymbol}. Sells subtract it. Adds and removes are left out. Click a source, then Shift+click another to check everything between them.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="text-xs text-foreground underline-offset-2 hover:underline"
-            onClick={() => {
-              anchor.current = null
-              onSelectAll()
-            }}
-          >
-            Select all
-          </button>
-          <button
-            type="button"
-            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-            onClick={() => {
-              anchor.current = null
-              onClear()
-            }}
-          >
-            Clear
-          </button>
-        </div>
+    <section className="rounded-xl bg-card px-3 py-1.5 ring-1 ring-foreground/10" aria-label="Funded by profit">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Funded by</h2>
+        <span className="inline-flex items-baseline gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">Selected</span>
+          <span className={`font-mono font-semibold ${profitTone(selectedProfit)}`}>{signedQuote(selectedProfit)} {quoteSymbol}</span>
+          <span className="text-xs text-muted-foreground">{checked.toLocaleString("en-US")} · {selectedSwaps.toLocaleString("en-US")} swaps</span>
+        </span>
+        <span className="inline-flex items-baseline gap-1.5 text-sm">
+          <span className="text-xs text-muted-foreground">Rest</span>
+          <span className={`font-mono font-semibold ${profitTone(excludedProfit)}`}>{signedQuote(excludedProfit)} {quoteSymbol}</span>
+          <span className="text-xs text-muted-foreground">{(rows.length - checked).toLocaleString("en-US")} · {excludedSwaps.toLocaleString("en-US")} swaps</span>
+        </span>
+        <button
+          type="button"
+          className="text-xs text-foreground underline-offset-2 hover:underline"
+          onClick={() => {
+            anchor.current = null
+            onSelectAll()
+          }}
+        >
+          Select all
+        </button>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => {
+            anchor.current = null
+            onClear()
+          }}
+        >
+          Clear
+        </button>
       </div>
-
       {needsLookup ? (
-        <p className="mt-2 text-xs text-muted-foreground">Load Funded by to split wallets. Until then every row is Unknown.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Load Funded by to split wallets. Until then every row is Unknown.</p>
       ) : null}
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <ProfitTotal
-          label="Selected"
-          detail={`${checked.toLocaleString("en-US")} source${checked === 1 ? "" : "s"} · ${selectedSwaps.toLocaleString("en-US")} swap${selectedSwaps === 1 ? "" : "s"}`}
-          amount={selectedProfit}
-          quoteSymbol={quoteSymbol}
-        />
-        <ProfitTotal
-          label="Excluding selected"
-          detail={`${(rows.length - checked).toLocaleString("en-US")} source${rows.length - checked === 1 ? "" : "s"} · ${excludedSwaps.toLocaleString("en-US")} swap${excludedSwaps === 1 ? "" : "s"}`}
-          amount={excludedProfit}
-          quoteSymbol={quoteSymbol}
-        />
-      </div>
-
-      <label className="mt-3 block text-xs text-muted-foreground">
+      <details className="mt-1">
+        <summary className="cursor-pointer text-xs text-muted-foreground">Sources · Shift+click a range</summary>
+      <label className="mt-2 block text-xs text-muted-foreground">
         Find a source
         <input
           value={query}
@@ -168,29 +156,8 @@ export function FunderProfitPanel({
           ))
         )}
       </ul>
+      </details>
     </section>
-  )
-}
-
-function ProfitTotal({
-  label,
-  detail,
-  amount,
-  quoteSymbol,
-}: {
-  label: string
-  detail: string
-  amount: string
-  quoteSymbol: string
-}) {
-  return (
-    <div className="rounded-xl bg-muted/40 px-3 py-2">
-      <p className="text-xs tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className={`mt-1 font-mono text-xl font-semibold ${profitTone(amount)}`}>
-        {signedQuote(amount)} {quoteSymbol}
-      </p>
-      <p className="text-xs text-muted-foreground">{detail}</p>
-    </div>
   )
 }
 

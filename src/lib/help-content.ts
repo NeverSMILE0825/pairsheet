@@ -2,7 +2,7 @@
  * In-app Help copy. Update this file whenever a user-facing feature changes so
  * the Help dialog always matches the live product (see .cursor/rules/help-content.mdc).
  */
-export const HELP_UPDATED_AT = "2026-11-17"
+export const HELP_UPDATED_AT = "2026-11-20"
 
 export type HelpExample = {
   title: string
@@ -27,6 +27,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       "Pair Sheet walks Swap / Mint / Burn (and Uniswap V4 equivalents) from the pool contract.",
       "Uniswap V4 is loaded from the pool id in the link. If a price index has not listed that pool yet, Pair Sheet reads the PoolManager Initialize event for the two tokens and still loads the tape. A regular pair whose index is missing falls back to the pool contract, then DexScreener.",
       "EVM swaps, including Uniswap V4 pool-id logs on the PoolManager, are read from the chain node. A 1,197-trade V4 pair loads every swap, not a single 1,000-log explorer page. If the node rejects the range, Pair Sheet falls back to the explorer and keeps going when that explorer returns 429.",
+      "The page stays short. The pair name, counts, pooled amount, and Save / CSV / Report share one bar. Bot / Smart contract and Funded by profit are one line each above the table. Open Sources under Funded by to check wallets. Shift+click still checks a range.",
       "Under the URL: checkboxes (off by default) include Gas, Holders, or Funded by on the next Load swaps. Each row also has a Load button to fetch that data after the tape is ready.",
       "Clicking Load asks for confirmation, then fills that column on the current tape. You can Save as soon as swaps finish — even if optional columns are still empty.",
       "Update, beside Load swaps, appends swaps newer than the open tape and fills Gas, Holders, and Funded by on those new rows (and on older rows that are still blank). Open a saved pair, then click Update to catch up without reading history you already have.",

@@ -237,7 +237,7 @@ type MinuteSortKey =
 
 const PAGE_ATTEMPTS = 3
 /** Both axes scroll inside the table card; header cells stay pinned. */
-const TABLE_SCROLL = "max-h-[70vh] overflow-auto overscroll-contain"
+const TABLE_SCROLL = "max-h-[calc(100dvh-15.5rem)] min-h-40 overflow-auto overscroll-contain"
 const TABLE_HEAD =
   "sticky top-0 z-10 bg-muted text-left text-xs tracking-wide text-muted-foreground uppercase [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-muted [&_th]:border-b [&_th]:border-border/80"
 /** How often an open tape checks the chain for swaps newer than the snapshot. */
@@ -2112,7 +2112,7 @@ export function Exporter() {
       clearSync()
       setSyncEnabled(false)
       setSyncStatus(getSyncStatus())
-      setSyncMessage("Not synced Â· this browser only.")
+      setSyncMessage("Not synced · this browser only.")
       return
     }
     setSyncBusy(true)
@@ -2141,7 +2141,7 @@ export function Exporter() {
       setSyncMessage(
         `Synced ${catalog.bookmarks.length} pair(s) as ${check.login ?? "GitHub"}. Other browsers will see them after a refresh.`,
       )
-      flashNotice(`Cloud sync is on Â· ${catalog.bookmarks.length} pair(s) on the shared list.`, "ok")
+      flashNotice(`Cloud sync is on · ${catalog.bookmarks.length} pair(s) on the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
       setSyncMessage(error instanceof Error ? error.message : "Could not publish bookmarks.")
@@ -2169,7 +2169,7 @@ export function Exporter() {
         setSyncMessage("Shared list is still empty after publish. Save pairs on this browser, then try again.")
         return
       }
-      setSyncMessage(`Synced Â· ${catalog.bookmarks.length} pair(s) Â· ${formatSyncAgo(status.lastOkAt)}`)
+      setSyncMessage(`Synced · ${catalog.bookmarks.length} pair(s) · ${formatSyncAgo(status.lastOkAt)}`)
       flashNotice(`Published ${catalog.bookmarks.length} saved pair(s) to the shared list.`, "ok")
     } catch (error) {
       setSyncStatus(getSyncStatus())
@@ -2181,51 +2181,46 @@ export function Exporter() {
   }
 
   return (
-    <div className="flex w-full flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8 lg:py-10 2xl:px-12">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="grid size-10 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_0_0_6px_oklch(0.82_0.12_190/0.12)]">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-2 px-3 py-2 sm:px-4">
+      <header className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
             <LedgerMark />
           </span>
-          <div>
-            <p className="text-xs font-medium tracking-[0.18em] text-primary uppercase">On-chain tape</p>
-            <div className="flex items-center gap-1.5">
-              <h1 className="font-heading text-3xl font-semibold tracking-tight">Pair Sheet</h1>
-              <HelpDialogButton />
-            </div>
-          </div>
+          <h1 className="font-heading text-base font-semibold tracking-tight">Pair Sheet</h1>
+          <HelpDialogButton />
         </div>
         <LiveMarketWidgets />
       </header>
 
       <form
-        className="rounded-2xl bg-card p-3 ring-1 ring-foreground/10 sm:p-4"
+        className="rounded-xl bg-card px-3 py-2 ring-1 ring-foreground/10"
         onSubmit={(event) => {
           event.preventDefault()
           void load()
         }}
       >
-        <label htmlFor="pair-url" className="mb-2 block text-sm font-medium">
-          DEXTools pair URL
-        </label>
-        <div className="flex flex-col gap-2">
-          <Input
-            id="pair-url"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://www.dextools.io/app/ether/pair-explorer/0x…"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            className="h-11 w-full font-mono text-sm"
-            aria-invalid={phase === "error"}
-          />
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <label htmlFor="pair-url" className="min-w-0 flex-1">
+            <span className="sr-only">DEXTools pair</span>
+            <Input
+              id="pair-url"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="DEXTools pair URL"
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              className="h-9 w-full font-mono text-sm"
+              aria-invalid={phase === "error"}
+            />
+          </label>
           <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="lg"
             variant="outline"
-            className="h-11 px-4"
+            className="h-9 px-3"
             disabled={phase === "loading"}
             onClick={() => {
               setSyncEnabled(hasSyncToken())
@@ -2247,7 +2242,7 @@ export function Exporter() {
             type="button"
             size="lg"
             variant="outline"
-            className="h-11 px-4"
+            className="h-9 px-3"
             disabled={phase === "loading" || manualUpdating || liveMode === "updating" || !pool || rawTrades.length === 0}
             title={pool && rawTrades.length > 0 ? "Append swaps newer than this tape" : "Open a saved pair or load swaps first"}
             onClick={() => void catchUpLatest(true)}
@@ -2255,7 +2250,7 @@ export function Exporter() {
             {manualUpdating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             {manualUpdating ? "Updating…" : "Update"}
           </Button>
-          <Button type="submit" size="lg" className="h-11 px-4" disabled={phase === "loading" || url.trim() === ""}>
+          <Button type="submit" size="lg" className="h-9 px-3" disabled={phase === "loading" || url.trim() === ""}>
             {phase === "loading" ? <Loader2 className="animate-spin" /> : null}
             {phase === "loading" ? "Reading chain" : "Load swaps"}
           </Button>
@@ -2270,7 +2265,7 @@ export function Exporter() {
                 : "Real-time updates off. Use Update to fetch the latest swaps."
             }
             onClick={() => changeLiveEnabled(!liveEnabled)}
-            className={`inline-flex h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium ring-1 ring-foreground/15 ${
+            className={`inline-flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium ring-1 ring-foreground/15 ${
               liveEnabled ? "bg-emerald-500/15 text-emerald-300" : "bg-muted text-muted-foreground"
             }`}
           >
@@ -2283,11 +2278,7 @@ export function Exporter() {
           </button>
           </div>
         </div>
-        <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
-          <p className="text-xs">
-            Optional lookups (off by default on Load swaps). After the tape is ready, use{" "}
-            <span className="text-foreground">Load</span> on a row to fetch that column — you will confirm first.
-          </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-2" title="Checked items run with Load swaps. Load fills that column on the tape you already have.">
           {(
             [
               {
@@ -2295,39 +2286,26 @@ export function Exporter() {
                 checked: lookupGas,
                 onChange: changeLookupGas,
                 busy: gasBusy,
-                label: (
-                  <>
-                    <span className="text-foreground">Gas Price</span> and{" "}
-                    <span className="text-foreground">Gas Fee Total</span>
-                  </>
-                ),
+                label: "Gas price and fee",
               },
               {
                 kind: "holders" as const,
                 checked: lookupHolders,
                 onChange: changeLookupHolders,
                 busy: holdersBusy,
-                label: (
-                  <>
-                    <span className="text-foreground">Holders</span> at each transaction
-                  </>
-                ),
+                label: "Holders",
               },
               {
                 kind: "funders" as const,
                 checked: lookupFunders,
                 onChange: changeLookupFunders,
                 busy: funding !== null,
-                label: (
-                  <>
-                    <span className="text-foreground">Funded by</span> for each maker
-                  </>
-                ),
+                label: "Funded by",
               },
             ] as const
           ).map((row) => (
-            <div key={row.kind} className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+            <div key={row.kind} className="flex items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-1.5 text-sm">
                 <input
                   type="checkbox"
                   className="size-4 shrink-0 rounded border-border"
@@ -2335,7 +2313,7 @@ export function Exporter() {
                   disabled={phase === "loading"}
                   onChange={(event) => row.onChange(event.target.checked)}
                 />
-                <span className="min-w-0">Include on Load swaps Â· {row.label}</span>
+                <span className="whitespace-nowrap">{row.label}</span>
               </label>
               {row.kind === "funders" ? (
                 <>
@@ -2425,10 +2403,10 @@ export function Exporter() {
                   {syncBusy
                     ? "Syncing with GitHub…"
                     : isSyncSuccessful(syncStatus)
-                      ? `Synced Â· ${syncStatus.lastCount} pair(s) Â· ${formatSyncAgo(syncStatus.lastOkAt)}`
+                      ? `Synced · ${syncStatus.lastCount} pair(s) · ${formatSyncAgo(syncStatus.lastOkAt)}`
                       : syncStatus.lastError
-                        ? "Not synced Â· publish failed"
-                        : "Not synced Â· this browser only"}
+                        ? "Not synced · publish failed"
+                        : "Not synced · this browser only"}
                 </p>
               </div>
               <Button type="button" size="icon" variant="ghost" aria-label="Close saved pairs" onClick={() => setSavedOpen(false)}>
@@ -2576,8 +2554,8 @@ export function Exporter() {
                               <span className="ml-2 text-xs font-normal text-muted-foreground">{item.chainName}</span>
                             </p>
                             <p className="truncate text-xs text-muted-foreground">
-                              {item.tradeCount.toLocaleString("en-US")} txs Â· saved {formatSavedAt(item.savedAt)}
-                              {local ? " Â· this browser" : " Â· shared list"}
+                              {item.tradeCount.toLocaleString("en-US")} txs · saved {formatSavedAt(item.savedAt)}
+                              {local ? " · this browser" : " · shared list"}
                             </p>
                           </div>
                         </div>
@@ -2779,15 +2757,15 @@ export function Exporter() {
       ) : null}
 
       {phase === "loading" || gasBusy ? (
-        <p className="text-sm text-muted-foreground" role="status">
+        <p className="rounded-xl bg-card px-4 py-2.5 text-sm text-muted-foreground ring-1 ring-foreground/10" role="status">
           {progress || (gasBusy ? "Filling gas fees…" : "")}
         </p>
       ) : holdersBusy ? (
-        <p className="text-sm text-muted-foreground" role="status">
+        <p className="rounded-xl bg-card px-4 py-2.5 text-sm text-muted-foreground ring-1 ring-foreground/10" role="status">
           Counting exact base-token holders at each transaction…
         </p>
       ) : funding ? (
-        <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground" role="status">
+        <p className="flex flex-wrap items-center gap-2 rounded-xl bg-card px-4 py-2.5 text-sm text-muted-foreground ring-1 ring-foreground/10" role="status">
           <span>
             {fundingPaused ? "Paused" : "Finding who funded each wallet"}: {funding.done.toLocaleString("en-US")} of{" "}
             {funding.total.toLocaleString("en-US")} · {fundingElapsedLabel()}
@@ -2797,7 +2775,7 @@ export function Exporter() {
           </Button>
         </p>
       ) : fundingResult ? (
-        <p className="text-sm text-muted-foreground" role="status">
+        <p className="rounded-xl bg-card px-4 py-2.5 text-sm text-muted-foreground ring-1 ring-foreground/10" role="status">
           {fundingResult}
         </p>
       ) : null}
@@ -2822,7 +2800,7 @@ export function Exporter() {
             <p className="mt-2 text-sm text-muted-foreground">
               {EXTRA_LOOKUP_COPY[confirmExtra].body}
               {pool
-                ? ` Currently loaded: ${pool.baseSymbol} / ${pool.quoteSymbol} Â· ${rawTrades.length.toLocaleString("en-US")} transactions.`
+                ? ` Currently loaded: ${pool.baseSymbol} / ${pool.quoteSymbol} · ${rawTrades.length.toLocaleString("en-US")} transactions.`
                 : ""}
             </p>
             <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -2851,87 +2829,39 @@ export function Exporter() {
       ) : null}
 
       {pool ? (
-        <section className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 rounded-2xl bg-card p-4 ring-1 ring-foreground/10 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-2xl font-semibold tracking-tight">
-                  {pool.baseSymbol} / {pool.quoteSymbol}
-                </h2>
-                <Badge>{pool.chainName}</Badge>
-                <Badge variant="outline">{pool.dex}</Badge>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                <button type="button" className="font-mono text-foreground hover:text-primary" onClick={() => void copyAddress()}>
-                  {copied ? "Copied" : pool.address}
-                </button>
-                <a className="inline-flex items-center gap-1 hover:text-foreground" href={pool.dextoolsUrl} target="_blank" rel="noreferrer">
-                  DEXTools <ExternalLink className="size-3.5" />
-                </a>
-                <a
-                  className="inline-flex items-center gap-1 hover:text-foreground"
-                  href={`${pool.explorerAddress}/${pool.address}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Explorer <ExternalLink className="size-3.5" />
-                </a>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                type="button"
-                size="lg"
-                variant="outline"
-                className="h-11"
-                onClick={() => void persistAnalysis()}
-                disabled={rawTrades.length === 0 || saveBusy || phase === "loading"}
-                title={
-                  holdersBusy || funding
-                    ? "Optional lookups still running; save keeps whatever gas, holders, and funders are filled so far."
-                    : undefined
-                }
-              >
-                {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
-                {saveBusy ? "Saving…" : "Save analysis"}
-              </Button>
-              <Button type="button" size="lg" className="h-11" onClick={download} disabled={filtered.length === 0}>
-                <Download />
-                Download CSV
-                {filtered.length > 0 ? ` Â· ${filtered.length.toLocaleString("en-US")}` : ""}
-              </Button>
-              <Button
-                type="button"
-                size="lg"
-                variant="outline"
-                className="h-11"
-                onClick={() => setReportOpen(true)}
-                disabled={rawTrades.length === 0}
-              >
-                <FileText />
-                Generate Report
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <Stat
-              label="Transactions"
-              value={stats.count.toLocaleString("en-US")}
-              hint={liveMode === "updating" ? "Updating…" : liveMode === "live" ? "Live" : undefined}
-            />
-            <Stat label="Buys" value={stats.buys.toLocaleString("en-US")} tone="buy" />
-            <Stat label="Sells" value={stats.sells.toLocaleString("en-US")} tone="sell" />
-            <Stat label="Add / Remove" value={`${stats.adds.toLocaleString("en-US")} / ${stats.removes.toLocaleString("en-US")}`} />
-            <Stat label="Quote volume" value={stats.volume} />
-          </div>
-
-          {pool && poolAnchor ? (
-            <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:flex-row sm:items-end sm:justify-between">
-              <label className="min-w-0 flex-1">
-                <span className="text-xs tracking-wide text-muted-foreground uppercase">
-                  Pooled {pool.quoteSymbol}
-                </span>
+        <section className="flex flex-col gap-2">
+          <div className="sticky top-1 z-30 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-card/95 px-3 py-1.5 ring-1 ring-foreground/10 backdrop-blur">
+            <h2 className="text-base font-semibold tracking-tight">
+              {pool.baseSymbol} / {pool.quoteSymbol}
+            </h2>
+            <Badge>{pool.chainName}</Badge>
+            <button
+              type="button"
+              className="font-mono text-xs text-muted-foreground hover:text-primary"
+              title={pool.address}
+              onClick={() => void copyAddress()}
+            >
+              {copied ? "Copied" : shortAddress(pool.address)}
+            </button>
+            <a className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" href={pool.dextoolsUrl} target="_blank" rel="noreferrer">
+              DEXTools <ExternalLink className="size-3" />
+            </a>
+            <span className="hidden h-4 w-px bg-border sm:block" />
+            <span className="text-sm tabular-nums">
+              {stats.count.toLocaleString("en-US")}
+              <span className="ml-1 text-xs text-muted-foreground">
+                {liveMode === "updating" ? "updating" : liveMode === "live" ? "live" : "txs"}
+              </span>
+            </span>
+            <span className="text-sm tabular-nums text-emerald-400">{stats.buys.toLocaleString("en-US")} buys</span>
+            <span className="text-sm tabular-nums text-rose-400">{stats.sells.toLocaleString("en-US")} sells</span>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {stats.adds.toLocaleString("en-US")}/{stats.removes.toLocaleString("en-US")} add/rem
+            </span>
+            <span className="text-xs tabular-nums text-muted-foreground">{stats.volume}</span>
+            {poolAnchor ? (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title={`Market cap scales with the square of pooled ${pool.quoteSymbol}. Latest row ${formatPoolSize(trimDecimal(poolAnchor.quoteReserve))} ${pool.quoteSymbol} → ${formatUsd(poolAnchor.marketCapUsd)}`}>
+                Pool
                 <Input
                   value={pooledShown}
                   onChange={(event) => {
@@ -2940,28 +2870,45 @@ export function Exporter() {
                   }}
                   inputMode="decimal"
                   spellCheck={false}
-                  className="mt-1 h-11 max-w-xs font-mono"
+                  className="h-7 w-24 font-mono text-xs"
                   aria-label={`Pooled ${pool.quoteSymbol} for market cap`}
                 />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Market cap moves with the square of pooled {pool.quoteSymbol}. The current amount matches the latest row.
-                </p>
-              </label>
-              <div className="min-w-0 sm:text-right">
-                <p className="text-xs tracking-wide text-muted-foreground uppercase">Estimated M. Cap</p>
-                <p className={`mt-1 font-mono text-xl ${changeTone(poolAnchor.marketCapUsd, estimatedMcap)}`}>
+                <span className={`font-mono text-sm ${changeTone(poolAnchor.marketCapUsd, estimatedMcap)}`}>
                   {estimatedMcap ? formatUsd(estimatedMcap) : "—"}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Latest row {formatPoolSize(trimDecimal(poolAnchor.quoteReserve))} {pool.quoteSymbol} →{" "}
-                  {formatUsd(poolAnchor.marketCapUsd)}
-                  {estimatedMcap && normalizePooledQuote(pooledShown) !== ""
-                    ? ` · ${describeMcapMultiple(poolAnchor.marketCapUsd, estimatedMcap)}`
-                    : ""}
-                </p>
-              </div>
+                </span>
+              </label>
+            ) : null}
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7"
+                onClick={() => void persistAnalysis()}
+                disabled={rawTrades.length === 0 || saveBusy || phase === "loading"}
+                title="Save analysis"
+              >
+                {saveBusy ? <Loader2 className="animate-spin" /> : <Save />}
+                Save
+              </Button>
+              <Button type="button" size="sm" className="h-7" onClick={download} disabled={filtered.length === 0} title="Download CSV">
+                <Download />
+                CSV{filtered.length > 0 ? ` ${filtered.length.toLocaleString("en-US")}` : ""}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7"
+                onClick={() => setReportOpen(true)}
+                disabled={rawTrades.length === 0}
+                title="Generate report"
+              >
+                <FileText />
+                Report
+              </Button>
             </div>
-          ) : null}
+          </div>
 
           {warning ? <p className="text-sm text-muted-foreground">{warning}</p> : null}
           {capped ? (
@@ -2970,10 +2917,9 @@ export function Exporter() {
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-2 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <span className="text-sm font-medium text-foreground">Table view</span>
-              <div className="flex gap-1 rounded-lg bg-muted p-1" role="tablist" aria-label="Table view">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-card px-2 py-1.5 ring-1 ring-foreground/10">
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1 rounded-lg bg-muted p-0.5" role="tablist" aria-label="Table view">
                 {(
                   [
                     ["transactions", "Transactions"],
@@ -2986,7 +2932,7 @@ export function Exporter() {
                     type="button"
                     role="tab"
                     aria-selected={tableView === view}
-                    className={`rounded-md px-4 py-2 text-sm font-semibold ${
+                    className={`rounded-md px-2.5 py-1 text-sm font-medium ${
                       tableView === view
                         ? "bg-primary text-primary-foreground"
                         : "text-muted-foreground hover:text-foreground"
@@ -3003,23 +2949,25 @@ export function Exporter() {
                   </button>
                 ))}
               </div>
+              {tableView === "blacklist" ? (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-9"
+                className="h-7"
                 disabled={blacklistIds.length === 0}
                 onClick={emptyBlacklist}
               >
                 Empty blacklist
               </Button>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-9"
+                className="h-7"
                 disabled={!pool || rawTrades.length === 0}
                 aria-pressed={showTotalGas}
                 onClick={() => setShowTotalGas((open) => !open)}
@@ -3035,17 +2983,6 @@ export function Exporter() {
                       }`}
                 </p>
               ) : null}
-              {tableView === "minutes" ? (
-              <p className="text-sm text-muted-foreground">
-                Deep Analysis Â· buy/sell counts, pool, holders, and gas per {intervalLabel} ({zoneName}).
-              </p>
-            ) : tableView === "blacklist" ? (
-              <p className="text-sm text-muted-foreground">
-                Checked swaps kept aside. Calculate Income here uses only this table.
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">Full swap tape with pool size, holders, gas, and funders.</p>
-            )}
             </div>
           </div>
 
@@ -3119,7 +3056,8 @@ export function Exporter() {
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 rounded-xl bg-card px-2 py-1.5 ring-1 ring-foreground/10">
+            <div className="flex flex-wrap items-center gap-2">
             {tableView !== "minutes" ? (
             <div className="flex gap-1 rounded-lg bg-muted p-1">
               {(Object.keys(FILTER_LABELS) as SideFilter[]).map((side) => (
@@ -3158,7 +3096,7 @@ export function Exporter() {
               </select>
             </label>
             {tableView !== "minutes" ? (
-              <>
+              <div className="order-2 flex basis-full flex-wrap items-center gap-2 border-t border-border/60 pt-3">
                 <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => setTeamLabelsOpen(true)}>
                   Team wallets
                   {teamLabels.length > 0 ? ` · ${teamLabels.length}` : ""}
@@ -3267,8 +3205,9 @@ export function Exporter() {
                     ? `MEV bots · ${mevCount.toLocaleString("en-US")}`
                     : "Detect MEV bots"}
                 </Button>
-              </>
+              </div>
             ) : null}
+            <div className="ml-auto">
             {tableView !== "minutes" ? (
               <ColumnsMenu
                 defs={TX_COLUMN_DEFS}
@@ -3300,6 +3239,8 @@ export function Exporter() {
                 }}
               />
             )}
+            </div>
+            </div>
             {activeLabel && labelNet !== null ? (
               <p className="text-sm text-muted-foreground" aria-live="polite">
                 <span className="font-medium text-foreground">{activeLabel.name}</span>
@@ -3319,19 +3260,17 @@ export function Exporter() {
           </div>
 
           {tableView !== "minutes" ? (
-          <div className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" size="lg" className="h-10" onClick={calculateIncome} disabled={activeSelected.size === 0}>
+          <div className="flex flex-col gap-2 rounded-xl bg-card px-2 py-1.5 ring-1 ring-foreground/10">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" className="h-7" onClick={calculateIncome} disabled={activeSelected.size === 0} title="Tick rows, then calculate. >> in Others blacklists a row. Shift+click selects a range.">
                 <Calculator />
-                Calculate Income
+                Income
               </Button>
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                {activeSelected.size === 0
-                  ? tableView === "blacklist"
-                    ? "Tick blacklist rows, then calculate. Trash removes that row."
-                    : "Tick rows to calculate income. >> in Others blacklists that row. Shift+click selects a range."
-                  : `${activeSelected.size.toLocaleString("en-US")} transaction${activeSelected.size === 1 ? "" : "s"} selected`}
+              {activeSelected.size > 0 ? (
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {activeSelected.size.toLocaleString("en-US")} selected
               </p>
+              ) : null}
               {activeTape.length > pageRows.length && !allMatchingSelected ? (
                 <button
                   type="button"
@@ -3410,7 +3349,7 @@ export function Exporter() {
                   ? `Show all${activeTape.length > 0 ? ` · ${activeTape.length.toLocaleString("en-US")}` : ""}`
                   : `Show selected${activeSelected.size > 0 ? ` · ${activeSelected.size.toLocaleString("en-US")}` : ""}`}
               </Button>
-              <div className="ml-auto flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 border-t border-border/60 pt-3">
                 <div
                   className="flex flex-wrap items-center gap-1 rounded-xl bg-muted/50 px-2 py-1.5 ring-1 ring-foreground/10"
                   role="group"
@@ -3566,10 +3505,8 @@ export function Exporter() {
           ) : null}
 
           {tableView !== "minutes" && funderProfitTape.length > 0 ? (
+            <div className="flex flex-col gap-1">
             <DextoolsBotPanel profit={botProfit} quoteSymbol={pool.quoteSymbol} scanning={botScan} />
-          ) : null}
-
-          {tableView !== "minutes" && funderProfitTape.length > 0 ? (
             <FunderProfitPanel
               rows={funderProfit.rows}
               selected={funderProfitSelected}
@@ -3597,6 +3534,7 @@ export function Exporter() {
               onSelectAll={() => setFunderProfitSelected(new Set(funderProfit.rows.map((row) => row.key)))}
               onClear={() => setFunderProfitSelected(new Set())}
             />
+            </div>
           ) : null}
 
           {tableView !== "minutes" && income ? (
@@ -3642,7 +3580,7 @@ export function Exporter() {
           {tableView === "minutes" ? (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className={TABLE_SCROLL}>
-              <table className="w-full border-separate border-spacing-0 text-sm" style={{ minWidth: tableMinWidth(daColCount) }}>
+              <table className="w-full border-separate border-spacing-0 text-sm tabular-nums" style={{ minWidth: tableMinWidth(daColCount) }}>
                 <caption className="sr-only">
                   Deep Analysis ({intervalLabel}) for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -3799,7 +3737,7 @@ export function Exporter() {
           ) : (
           <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-foreground/10">
             <div className={TABLE_SCROLL}>
-              <table className="w-full border-separate border-spacing-0 text-sm" style={{ minWidth: tableMinWidth(txColCount + 1) }}>
+              <table className="w-full border-separate border-spacing-0 text-sm tabular-nums" style={{ minWidth: tableMinWidth(txColCount + 1) }}>
                 <caption className="sr-only">
                   Swaps for {pool.baseSymbol} / {pool.quoteSymbol}
                 </caption>
@@ -4085,7 +4023,7 @@ export function Exporter() {
                         {showTx("others") ? (
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className="inline-flex items-center gap-2">
-                              {trade.dextoolsBot ? <DextoolsBotIcon className="size-[18px]" /> : null}
+                              {trade.dextoolsBot ? <DextoolsBotIcon className="h-[18px] w-auto" /> : null}
                               {trade.makerTags.includes("team") ? (
                                 <span
                                   className="text-amber-400"
@@ -4138,7 +4076,7 @@ export function Exporter() {
           )}
           <nav
             aria-label="Pagination"
-            className="flex flex-col gap-3 rounded-2xl bg-card px-4 py-3 text-sm ring-1 ring-foreground/10 sm:flex-row sm:items-center sm:justify-between"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-card px-2 py-1.5 text-sm ring-1 ring-foreground/10"
           >
             <p className="text-muted-foreground" aria-live="polite">
               Showing {firstShown.toLocaleString("en-US")}—{lastShown.toLocaleString("en-US")} of{" "}
@@ -4462,32 +4400,6 @@ function MinuteSortHeader({
   )
 }
 
-function Stat({
-  label,
-  value,
-  tone,
-  hint,
-}: {
-  label: string
-  value: string
-  tone?: "buy" | "sell"
-  hint?: string
-}) {
-  const color = tone === "buy" ? "text-emerald-400" : tone === "sell" ? "text-rose-400" : "text-foreground"
-  return (
-    <div className="rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
-      <p className="text-xs tracking-wide text-muted-foreground uppercase">{label}</p>
-      <p className={`mt-1 font-mono text-xl ${color}`}>{value}</p>
-      {hint ? (
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-emerald-400">
-          <span aria-hidden className="size-1.5 rounded-full bg-emerald-500" />
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
 /** Gas, holder counts, and funders for rows an update just appended. Existing values stay. */
 async function enrichNewTrades(
   chainId: string,
@@ -4577,10 +4489,9 @@ async function persistCaughtUpTape(
 
 function Step({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <article className="rounded-2xl bg-card p-4 ring-1 ring-foreground/10">
-      <p className="font-mono text-xs text-primary">0{n}</p>
-      <h2 className="mt-2 font-medium">{title}</h2>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">{body}</p>
+    <article className="rounded-xl bg-card px-3 py-2 ring-1 ring-foreground/10">
+      <h2 className="text-sm font-medium"><span className="mr-2 font-mono text-xs text-primary">0{n}</span>{title}</h2>
+      <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{body}</p>
     </article>
   )
 }
